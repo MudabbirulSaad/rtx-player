@@ -6,6 +6,8 @@ Rust crate versions and registry checksums are recorded in Cargo.lock. libloadin
 
 RTX Player source is licensed under GPL-3.0-or-later.
 
+The optional Windows export tool is FFmpeg 9.0.2 from the imageio-ffmpeg 0.8.1 Windows wheel. The setup script verifies the wheel and executable independently. The executable includes GPL-licensed codecs. Its license information is available with `tools/ffmpeg.exe -L`. The Python wrapper and the FFmpeg executable have separate licenses. [Distribution and source](https://pypi.org/project/imageio-ffmpeg/0.8.1/) · [FFmpeg licensing](https://ffmpeg.org/legal.html)
+
 The Anime4K small 2× CNN shader is copyright bloc97 and licensed under MIT. Its source and license are included under assets/Anime4K. [Upstream revision](https://github.com/bloc97/Anime4K/tree/7684e9586f8dcc738af08a1cdceb024cc184f426)
 
 The optional RIFE setup fetches upstream components directly into the selected application build. The manifest pins the origin and SHA-256 of each download. CPython's embedded distribution includes its PSF license and notices. The VapourSynth wheel includes its LGPL-2.1-or-later license. The NCNN filter project supplies the unsigned Windows DLL and the model pair. Its repository license is MIT. The redistributability of the model weights and the complete native dependency chain requires separate review before including them in a public binary release. [CPython](https://www.python.org/downloads/release/python-31410/) · [VapourSynth](https://github.com/vapoursynth/vapoursynth/tree/R82) · [Filter and model source](https://github.com/styler00dollar/VapourSynth-RIFE-ncnn-Vulkan/tree/c3ec6aabc07c8fa37a4f58d7fed9e2ad1fc1b13f)

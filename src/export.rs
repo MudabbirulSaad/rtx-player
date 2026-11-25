@@ -1,6 +1,10 @@
 //! Local SDR transcodes. The encoder never receives the final output filename.
 use crate::playback::{PlaybackEvent, Player};
+use std::io::{BufRead, BufReader, Read};
+use std::os::windows::process::CommandExt;
 use std::path::Path;
+use std::process::{Command, Stdio};
+use std::sync::atomic::AtomicU64;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
@@ -33,7 +37,7 @@ impl Profile {
             filters.push(format!("scale=-2:{h}:flags=lanczos"));
         }
         filters.push("format=yuv420p".into());
-        Ok(format!("lavfi=[{}]", filters.join(",")))
+        Ok(filters.join(","))
     }
 }
 
@@ -103,6 +107,71 @@ fn check_cancel(cancel: &AtomicBool) -> Result<(), String> {
     }
 }
 
+fn run_encoder(
+    mut command: Command,
+    cancel: &AtomicBool,
+    mut report: impl FnMut(u64),
+) -> Result<(), String> {
+    let mut child = command
+        .creation_flags(0x08000000)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Cannot start the bundled FFmpeg export tool: {e}"))?;
+    let output = child.stdout.take().expect("encoder stdout is piped");
+    let errors = child.stderr.take().expect("encoder stderr is piped");
+    let micros = AtomicU64::new(0);
+    std::thread::scope(|scope| {
+        scope.spawn(|| {
+            for line in BufReader::new(output).lines().map_while(Result::ok) {
+                if let Some(t) = line
+                    .strip_prefix("out_time_us=")
+                    .and_then(|s| s.parse().ok())
+                {
+                    micros.store(t, Ordering::Relaxed);
+                }
+            }
+        });
+        let log = scope.spawn(move || {
+            let mut last = Vec::new();
+            let mut errors = errors;
+            let mut block = [0u8; 2048];
+            while let Ok(n) = errors.read(&mut block) {
+                if n == 0 {
+                    break;
+                }
+                last.extend_from_slice(&block[..n]);
+                if last.len() > 4096 {
+                    last.drain(..last.len() - 4096);
+                }
+            }
+            String::from_utf8_lossy(&last).trim().to_owned()
+        });
+        loop {
+            if cancel.load(Ordering::Relaxed) {
+                let _ = child.kill();
+                child.wait().map_err(|e| e.to_string())?;
+                return Err("Export cancelled.".into());
+            }
+            match child.try_wait() {
+                Ok(Some(status)) if status.success() => return Ok(()),
+                Ok(Some(_)) => {
+                    let detail = log.join().unwrap_or_default();
+                    return Err(format!("Encoding failed. {detail}"));
+                }
+                Ok(None) => report(micros.load(Ordering::Relaxed)),
+                Err(error) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(error.to_string());
+                }
+            }
+            std::thread::sleep(Duration::from_millis(120));
+        }
+    })
+}
+
 pub fn transcode(
     runtime: &Path,
     source: &Path,
@@ -144,48 +213,66 @@ pub fn transcode(
         .tempfile_in(parent)
         .map_err(|e| e.to_string())?
         .into_temp_path();
-    let path = temporary.to_str().ok_or("Unsupported output path")?;
-    let (codec, quality) = match profile.encoder {
-        Encoder::Software => ("libx264", format!("crf={},preset=medium", profile.quality)),
-        Encoder::Nvenc => ("h264_nvenc", format!("rc=vbr,cq={},b=0", profile.quality)),
-    };
-    {
-        let mut writer = Player::offline(
-            runtime,
-            &[
-                (c"o", path),
-                (c"of", format),
-                (c"ovc", codec),
-                (c"ovcopts", &quality),
-                (c"oac", "aac"),
-                (c"vf", &filter),
-                (c"hwdec", "no"),
-                (c"sid", "no"),
-                (c"audio-display", "no"),
-            ],
-        )?;
-        writer.load(&source)?;
-        let mut last = Instant::now();
-        loop {
-            check_cancel(cancel)?;
-            match writer.event(0.1)? {
-                PlaybackEvent::Ended => break,
-                PlaybackEvent::Shutdown => {
-                    return Err("The encoder stopped before completion.".into());
-                }
-                _ => (),
-            }
-            if last.elapsed() >= Duration::from_millis(250) {
-                if let Some(pos) = writer
-                    .property(c"time-pos")
-                    .and_then(|s| s.parse::<f64>().ok())
-                {
-                    progress((pos / input.duration).clamp(0., 0.99));
-                }
-                last = Instant::now();
-            }
-        }
+    let encoder = runtime.with_file_name("tools").join("ffmpeg.exe");
+    let mut command = Command::new(encoder);
+    command
+        .args([
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-xerror",
+            "-nostats",
+            "-progress",
+            "pipe:1",
+            "-protocol_whitelist",
+            "file",
+            "-i",
+        ])
+        .arg(&source)
+        .args([
+            "-map",
+            "0:V:0",
+            "-map",
+            "0:a?",
+            "-map",
+            "0:s?",
+            "-map_chapters",
+            "0",
+            "-map_metadata",
+            "0",
+            "-vf",
+            &filter,
+            "-fps_mode",
+            "passthrough",
+            "-c:a",
+            "aac",
+        ]);
+    if format == "matroska" {
+        command.args(["-c:s", "copy", "-map", "0:t?", "-c:t", "copy"]);
+    } else {
+        command.args(["-c:s", "mov_text"]);
     }
+    let quality = profile.quality.to_string();
+    match profile.encoder {
+        Encoder::Software => command.args(["-c:v", "libx264", "-crf", &quality]),
+        Encoder::Nvenc => command.args([
+            "-c:v",
+            "h264_nvenc",
+            "-rc",
+            "vbr",
+            "-cq",
+            &quality,
+            "-b:v",
+            "0",
+        ]),
+    };
+    command
+        .args(["-f", format, "-y"])
+        .arg(temporary.as_os_str());
+    run_encoder(command, cancel, |micros| {
+        progress((micros as f64 / 1_000_000.0 / input.duration).clamp(0., 0.99))
+    })?;
     let output = inspect(runtime, &temporary, cancel)?;
     if (output.duration - input.duration).abs() > 0.25
         || output.height != profile.height.unwrap_or(input.height)

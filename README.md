@@ -38,7 +38,7 @@ An RTX toggle lights up when the driver accepts its extension. Playback statisti
 
 ## Local video export
 
-Open an SDR video and choose Export. Select the CPU H.264 encoder or NVIDIA NVENC, set an output height and quality, and optionally enable denoising. Lower quality numbers retain more detail. Save as MP4 or MKV. The output contains H.264 video and AAC audio from the selected source audio stream. This profile omits subtitles. The app checks the temporary file's duration, resolution and audio before saving it under a new name. Cancel export removes the incomplete file.
+For a development build, install the pinned encoder with `python -m scripts.fetch_export target/debug/rtx-player-desktop.exe`. Open an SDR video and choose Export. Select CPU H.264 or NVIDIA NVENC, set an output height and quality, and optionally enable denoising. Lower quality numbers retain more detail. The encoder preserves video timestamps and chapters and transcodes audio to AAC. MKV copies subtitles and attachments. MP4 converts text subtitles to timed text. Use MKV for bitmap subtitles. The app checks the temporary file's duration, resolution and audio before saving it under a new name. Cancelling removes the incomplete file.
 
 ## Tests
 
