@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod desktop;
 mod engine;
+mod export;
 mod rife;
 mod rtx;
 fn main() -> tauri::Result<()> {

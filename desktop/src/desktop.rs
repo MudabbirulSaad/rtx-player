@@ -1,4 +1,5 @@
 use crate::engine::{Control, Engine, Snapshot};
+use crate::export::Exports;
 use std::path::PathBuf;
 use tauri::webview::WebviewBuilder;
 use tauri::window::WindowBuilder;
@@ -46,6 +47,7 @@ const SS_BLACKRECT: u32 = 4;
 
 pub fn run() -> tauri::Result<()> {
     tauri::Builder::default()
+        .manage(Exports::default())
         .setup(|app| {
             let window = WindowBuilder::new(app, "player")
                 .title("RTX Player")
@@ -97,10 +99,14 @@ pub fn run() -> tauri::Result<()> {
                         api.prevent_close();
                         if let Some(worker) = host.state::<Engine>().shutdown() {
                             let app = host.app_handle().clone();
+                            let export = host.state::<Exports>().shutdown();
                             // Pump window messages until libmpv releases the child surface.
                             std::thread::spawn(move || {
                                 if worker.join().is_err() {
                                     eprintln!("Playback worker failed during shutdown");
+                                }
+                                if let Some(export) = export {
+                                    let _ = export.join();
                                 }
                                 app.exit(0);
                             });
@@ -136,6 +142,9 @@ pub fn run() -> tauri::Result<()> {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            crate::export::start_export,
+            crate::export::export_status,
+            crate::export::cancel_export,
             open_media,
             playback_state,
             transport,

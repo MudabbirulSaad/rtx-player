@@ -36,6 +36,10 @@ RTX VSR requests 2× spatial scaling from the NVIDIA D3D11 video processor. Sele
 
 An RTX toggle lights up when the driver accepts its extension. Playback statistics report the processed dimensions and transfer function, the renderer target, and the Windows display mode. The HDR10 swap chain indicator requires a renderer report of 10-bit RGB with BT.2020 primaries and the PQ transfer function. The NVIDIA filter supplies a nominal peak luminance of 1000 nits for converted content.
 
+## Local video export
+
+Open an SDR video and choose Export. Select the CPU H.264 encoder or NVIDIA NVENC, set an output height and quality, and optionally enable denoising. Lower quality numbers retain more detail. Save as MP4 or MKV. The output contains H.264 video and AAC audio from the selected source audio stream. This profile omits subtitles. The app checks the temporary file's duration, resolution and audio before saving it under a new name. Cancel export removes the incomplete file.
+
 ## Tests
 
 ```powershell
