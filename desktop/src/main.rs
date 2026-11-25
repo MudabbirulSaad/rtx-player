@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod desktop;
 mod engine;
+mod export;
 mod rife;
 fn main() -> tauri::Result<()> {
     // Set the optional script runtime before Tauri or the playback worker starts.

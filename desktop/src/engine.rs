@@ -6,6 +6,8 @@ use std::time::{Duration, Instant};
 
 #[derive(Clone, Default, Serialize)]
 pub struct Snapshot {
+    #[serde(skip)]
+    pub source: Option<PathBuf>,
     pub title: Option<String>,
     pub position: Option<f64>,
     pub duration: Option<f64>,
@@ -212,6 +214,10 @@ fn run(
                     .filter(|v| v.is_finite())
             };
             let state = Snapshot {
+                source: player
+                    .property(c"path")
+                    .map(PathBuf::from)
+                    .filter(|p| p.is_absolute()),
                 title: player.property(c"media-title"),
                 position: number(c"time-pos"),
                 duration: number(c"duration"),
