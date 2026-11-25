@@ -48,7 +48,13 @@ Choose Tracks to switch audio or subtitle streams, open an external subtitle fil
 
 Open Library and enable **Remember recent videos** to save playback positions on this computer. Search by title or select a recent video to continue watching. Clearing history removes the saved entries. Volume and playback speed are saved separately. The app normally stores its SQLite database in its local application data directory. An empty `portable.mode` file beside the executable directs the database to a `data` folder beside it.
 
-## Tests
+## Windows packages
+
+With the build prerequisites installed, run `python -m scripts.package_windows <new-output-directory>` from the checkout. The command builds the desktop app, a portable ZIP and a current-user NSIS installer. It writes SHA-256 checksums and includes a dependency inventory in both packages. Windows WebView2 is required. RIFE is a separate optional download.
+
+Extract the entire portable archive into a writable folder and launch `rtx-player-desktop.exe`. The installer adds an entry to Windows Installed apps. Use that entry to uninstall it.
+
+## Local verification
 
 ```powershell
 cargo test --workspace --locked
