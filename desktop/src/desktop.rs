@@ -1,6 +1,10 @@
 use crate::engine::{Control, Engine, Snapshot};
 use crate::export::Exports;
 use std::path::PathBuf;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use tauri::webview::WebviewBuilder;
 use tauri::window::WindowBuilder;
 use tauri::{Manager, PhysicalPosition, PhysicalSize, State, WebviewUrl, WindowEvent};
@@ -40,6 +44,43 @@ fn fullscreen(window: tauri::Window) -> Result<(), String> {
 fn layout(size: PhysicalSize<u32>, scale: f64) -> (u32, u32) {
     let controls = ((150.0 * scale).round() as u32).clamp(1, size.height.max(1));
     (size.height.saturating_sub(controls), controls)
+}
+
+struct Surfaces {
+    video: usize,
+    controls: tauri::Webview,
+    expanded: AtomicBool,
+}
+impl Surfaces {
+    fn arrange(&self, size: PhysicalSize<u32>, scale: f64) -> tauri::Result<()> {
+        if size.width == 0 || size.height == 0 {
+            return Ok(());
+        }
+        let (video, controls) = if self.expanded.load(Ordering::Relaxed) {
+            (0, size.height)
+        } else {
+            layout(size, scale)
+        };
+        unsafe {
+            MoveWindow(self.video as _, 0, 0, size.width as i32, video as i32, 1);
+        }
+        self.controls.set_bounds(tauri::Rect {
+            position: PhysicalPosition::new(0, video as i32).into(),
+            size: PhysicalSize::new(size.width, controls).into(),
+        })
+    }
+}
+
+#[tauri::command]
+fn expand_controls(window: tauri::Window, expanded: bool) -> Result<(), String> {
+    let surfaces = window.state::<Surfaces>();
+    surfaces.expanded.store(expanded, Ordering::Relaxed);
+    surfaces
+        .arrange(
+            window.inner_size().map_err(|e| e.to_string())?,
+            window.scale_factor().map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| e.to_string())
 }
 
 // SS_BLACKRECT paints the idle STATIC control black before a stream opens.
@@ -83,6 +124,24 @@ pub fn run() -> tauri::Result<()> {
                 PhysicalPosition::new(0, video as i32),
                 PhysicalSize::new(size.width, controls),
             )?;
+            app.manage(Surfaces {
+                video: surface,
+                controls: bar,
+                expanded: AtomicBool::new(false),
+            });
+            let executable = std::env::current_exe()?;
+            let dir = executable
+                .parent()
+                .ok_or_else(|| std::io::Error::other("Missing application directory"))?;
+            let profile = if dir.join("portable.mode").is_file() {
+                Ok(dir.join("data"))
+            } else {
+                app.path().app_local_data_dir().map_err(|e| e.to_string())
+            };
+            let library = profile
+                .and_then(|p| crate::library::Library::open(&p.join("library.sqlite3")))
+                .map(Arc::new);
+            app.manage(crate::library::Catalog(library.clone()));
             app.manage(Engine::start(
                 runtime,
                 surface,
@@ -91,6 +150,7 @@ pub fn run() -> tauri::Result<()> {
                     tauri::path::BaseDirectory::Resource,
                 )?,
                 std::env::args_os().nth(1).map(PathBuf::from),
+                library.ok(),
             )?);
             let host = window.clone();
             window.on_window_event(move |event| {
@@ -125,23 +185,22 @@ pub fn run() -> tauri::Result<()> {
                     }
                     _ => return,
                 };
-                if size.width == 0 || size.height == 0 {
-                    return;
-                }
-                let (video, controls) = layout(size, host.scale_factor().unwrap_or(1.0));
-                unsafe {
-                    MoveWindow(surface as _, 0, 0, size.width as i32, video as i32, 1);
-                }
-                if let Err(e) = bar.set_bounds(tauri::Rect {
-                    position: PhysicalPosition::new(0, video as i32).into(),
-                    size: PhysicalSize::new(size.width, controls).into(),
-                }) {
+                if let Err(e) = host
+                    .state::<Surfaces>()
+                    .arrange(size, host.scale_factor().unwrap_or(1.0))
+                {
                     eprintln!("Resize controls: {e}");
                 }
             });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            expand_controls,
+            crate::library::library_entries,
+            crate::library::library_preferences,
+            crate::library::set_library_preferences,
+            crate::library::open_recent,
+            crate::library::clear_history,
             crate::export::start_export,
             crate::export::export_status,
             crate::export::cancel_export,

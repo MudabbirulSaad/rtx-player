@@ -2,6 +2,7 @@
 mod desktop;
 mod engine;
 mod export;
+mod library;
 mod rife;
 mod rtx;
 fn main() -> tauri::Result<()> {

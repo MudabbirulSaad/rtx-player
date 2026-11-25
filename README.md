@@ -40,6 +40,10 @@ An RTX toggle lights up when the driver accepts its extension. Playback statisti
 
 For a development build, install the pinned encoder with `python -m scripts.fetch_export target/debug/rtx-player-desktop.exe`. Open an SDR video and choose Export. Select CPU H.264 or NVIDIA NVENC, set an output height and quality, and optionally enable denoising. Lower quality numbers retain more detail. The encoder preserves video timestamps and chapters and transcodes audio to AAC. MKV copies subtitles and attachments. MP4 converts text subtitles to timed text. Use MKV for bitmap subtitles. The app checks the temporary file's duration, resolution and audio before saving it under a new name. Cancelling removes the incomplete file.
 
+## Library and settings
+
+Open Library and enable **Remember recent videos** to save playback positions on this computer. Search by title or select a recent video to continue watching. Clearing history removes the saved entries. Volume and playback speed are saved separately. The app normally stores its SQLite database in its local application data directory. An empty `portable.mode` file beside the executable directs the database to a `data` folder beside it.
+
 ## Tests
 
 ```powershell

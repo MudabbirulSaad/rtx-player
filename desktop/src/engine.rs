@@ -130,6 +130,7 @@ impl Engine {
         surface: usize,
         shader: PathBuf,
         initial: Option<PathBuf>,
+        library: Option<Arc<crate::library::Library>>,
     ) -> Result<Self, String> {
         let (tx, rx) = mpsc::sync_channel(16);
         let snapshot = Arc::new(Mutex::new(Snapshot::default()));
@@ -137,7 +138,7 @@ impl Engine {
         let thread = std::thread::Builder::new()
             .name("playback".into())
             .spawn(move || {
-                let result = run(runtime, surface, shader, rx, &shared);
+                let result = run(runtime, surface, shader, rx, &shared, library.as_deref());
                 if let Err(error) = result
                     && let Ok(mut s) = shared.lock()
                 {
@@ -202,6 +203,7 @@ fn run(
     shader: PathBuf,
     rx: mpsc::Receiver<Request>,
     shared: &Mutex<Snapshot>,
+    library: Option<&crate::library::Library>,
 ) -> Result<(), String> {
     let mut player = Player::embedded(&runtime, surface)?;
     let mut rife = crate::rife::Rife::new(runtime.parent().ok_or("Missing application directory")?);
@@ -213,9 +215,37 @@ fn run(
     let mut last = Instant::now();
     let mut error = None;
     let mut hdr10_swapchain = None;
+    if let Some(db) = library {
+        match db.preferences() {
+            Ok(prefs) => {
+                player.command(&["set", "volume", &prefs.volume.to_string()])?;
+                player.command(&["set", "speed", &prefs.speed.to_string()])?;
+            }
+            Err(e) => error = Some(e),
+        }
+    }
+    let mut saved = Instant::now();
+    let save_progress = || -> Result<(), String> {
+        let snapshot = shared
+            .lock()
+            .map_err(|_| "Playback state unavailable")?
+            .clone();
+        if let (Some(db), Some(path), Some(pos), Some(duration)) = (
+            library,
+            snapshot.source,
+            snapshot.position,
+            snapshot.duration,
+        ) {
+            db.position(&path, pos, duration)?;
+        }
+        Ok(())
+    };
     loop {
         match rx.recv_timeout(Duration::from_millis(25)) {
             Ok(Request::Open(path)) => {
+                if let Err(e) = save_progress() {
+                    eprintln!("Save playback position: {e}")
+                }
                 if rtx.requested.any() {
                     rtx.clear(&mut player)?;
                 }
@@ -228,17 +258,52 @@ fn run(
                 }
             }
             Ok(Request::Control(command)) => {
+                let preference = matches!(command, Control::Volume(_) | Control::Speed(_));
                 error = command
                     .apply(&mut player, &shader, &mut rife, &mut rtx, surface)
                     .err();
+                if preference
+                    && error.is_none()
+                    && let Some(db) = library
+                {
+                    let volume = player.property(c"volume").and_then(|s| s.parse().ok());
+                    let speed = player.property(c"speed").and_then(|s| s.parse().ok());
+                    if let (Some(volume), Some(speed)) = (volume, speed) {
+                        error = db.transport(volume, speed).err();
+                    }
+                }
             }
-            Err(mpsc::RecvTimeoutError::Disconnected) => return Ok(()),
+            Err(mpsc::RecvTimeoutError::Disconnected) => return save_progress(),
             Err(mpsc::RecvTimeoutError::Timeout) => {}
         }
         for _ in 0..32 {
             match player.event(0.0) {
                 Ok(PlaybackEvent::Idle) => break,
                 Ok(PlaybackEvent::Shutdown) => return Ok(()),
+                Ok(PlaybackEvent::Loaded) => {
+                    if let (Some(db), Some(path)) =
+                        (library, player.property(c"path").map(PathBuf::from))
+                        && path.is_absolute()
+                    {
+                        let result = (|| {
+                            let resume = db.resume(&path)?;
+                            let title = player.property(c"media-title").unwrap_or_else(|| {
+                                path.file_name()
+                                    .unwrap_or_default()
+                                    .to_string_lossy()
+                                    .into_owned()
+                            });
+                            db.visit(&path, &title)?;
+                            if let Some(pos) = resume {
+                                player.command(&["seek", &pos.to_string(), "absolute+exact"])?;
+                            }
+                            Ok::<_, String>(())
+                        })();
+                        if let Err(e) = result {
+                            error = Some(e)
+                        }
+                    }
+                }
                 Ok(PlaybackEvent::SwapChain { hdr10 }) => hdr10_swapchain = Some(hdr10),
                 Ok(PlaybackEvent::SuperResolution) => {
                     rtx.accepted.super_resolution = rtx.requested.super_resolution
@@ -318,6 +383,12 @@ fn run(
                 error: error.clone(),
             };
             *shared.lock().map_err(|_| "Playback state unavailable")? = state;
+            if saved.elapsed() >= Duration::from_secs(5) {
+                if let Err(e) = save_progress() {
+                    error = Some(e);
+                }
+                saved = Instant::now();
+            }
             last = Instant::now();
         }
     }

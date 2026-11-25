@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { Activity, FolderOpen, Maximize, Pause, Play, Volume2 } from 'lucide-react'
 import { ExportPanel } from './ExportPanel'
+import { LibraryPanel } from './LibraryPanel'
 import './player.css'
 
 type Effects = { super_resolution: boolean; hdr: boolean }
@@ -28,6 +29,7 @@ export function Player() {
   const [state, setState] = useState<Playback | null>(null)
   const [issue, setIssue] = useState('')
   const [exporting, setExporting] = useState(false)
+  const [library, setLibrary] = useState(false)
   const [stats, setStats] = useState(false)
   const [scrub, setScrub] = useState<number | null>(null)
   const [volume, setVolume] = useState<number | null>(null)
@@ -90,6 +92,7 @@ export function Player() {
     `Windows ${state.display_hdr == null ? 'unknown' : state.display_hdr ? 'HDR' : 'SDR'}` + (state.display_bits ? ` ${state.display_bits}-bit` : ''),
     ...(state.hdr10_swapchain ? ['HDR10 swap chain'] : []),
   ].join(' · ')
+  if (library) return <LibraryPanel close={()=>setLibrary(false)}/>
   if (exporting) return <ExportPanel close={()=>setExporting(false)}/>
   return <section className="shell flex flex-col justify-center gap-2 px-5" aria-label="Playback controls">
     <div className="flex items-center justify-between gap-3">
@@ -105,6 +108,7 @@ export function Player() {
         aria-label={state?.paused ? 'Play' : 'Pause'} onClick={() => void transport({kind:'toggle'})}>
         {state?.paused || !playing ? <Play/> : <Pause/>}</button>
       <button onClick={() => void request('open_media')} title="Open file (Ctrl+O)"><FolderOpen/>Open</button>
+      <button onClick={()=>setLibrary(true)}>Library</button>
       <button disabled={!playing} onClick={()=>setExporting(true)}>Export</button>
       <span className="error truncate" role="status" title={issue || state?.error || undefined}>{issue || state?.error}</span>
       <div className="ml-auto flex items-center gap-2">

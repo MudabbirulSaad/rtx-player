@@ -12,6 +12,10 @@ tauri = { version = "=2.12.7", features = ["unstable"] }
 serde = { version = "1", features = ["derive"] }
 rfd = "0.15"
 windows-sys = { version = "0.61", features = ["Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_System_LibraryLoader"] }
+rusqlite = { version = "=0.43.0", default-features = false, features = ["bundled", "libsqlite3-sys"] }
 
 [build-dependencies]
 tauri-build = "2"
+
+[dev-dependencies]
+tempfile = "3.27"

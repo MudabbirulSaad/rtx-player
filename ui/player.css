@@ -18,4 +18,17 @@ select { background: #202528; font-variant-numeric: tabular-nums; }
 .error { color: #f5b7a7; font-size: 12px; }
 .enhancements { border-top: 1px solid #303639; padding-top: 4px; }
 .metrics { color: #d2d8dc; font-size: 12px; font-variant-numeric: tabular-nums; }
+.library { min-height: 100vh; padding: 24px clamp(20px,5vw,64px); background: #151a1c; }
+.library header, .library-options, .confirm { display:flex; align-items:center; flex-wrap:wrap; gap:16px; }
+.library header { margin:28px 0 18px; justify-content:space-between; }
+.library h1 { font-size:32px; font-weight:650; }
+.library h2 { margin:28px 0 12px; font-size:18px; font-weight:600; }
+.library p, .library li span { color:#c0c9ce; }
+.library-options label { display:flex; align-items:center; gap:7px; }
+.search { display:flex; align-items:center; gap:8px; padding:8px 12px; border:1px solid #515a60; border-radius:6px; }
+.search svg { width:16px; height:16px; }
+.library li { border-bottom:1px solid #364044; }
+.library li button { width:100%; min-height:44px; justify-content:flex-start; }
+.library li span { margin-left:auto; }
+.confirm { margin-top:14px; }
 button[aria-pressed="true"] { color: #b0edcd; background: #253b30; }
