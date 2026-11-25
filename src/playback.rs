@@ -26,6 +26,7 @@ struct Api {
     option: unsafe extern "C" fn(Handle, *const c_char, *const c_char) -> c_int,
     command: unsafe extern "C" fn(Handle, *const *const c_char) -> c_int,
     log_level: unsafe extern "C" fn(Handle, *const c_char) -> c_int,
+    observe: unsafe extern "C" fn(Handle, u64, *const c_char, c_int) -> c_int,
     get: unsafe extern "C" fn(Handle, *const c_char) -> *mut c_char,
     free: unsafe extern "C" fn(*mut c_void),
     wait: unsafe extern "C" fn(Handle, f64) -> *const Event,
@@ -58,6 +59,7 @@ impl Api {
                 option: symbol!("mpv_set_option_string"),
                 command: symbol!("mpv_command"),
                 log_level: symbol!("mpv_request_log_messages"),
+                observe: symbol!("mpv_observe_property"),
                 get: symbol!("mpv_get_property_string"),
                 free: symbol!("mpv_free"),
                 wait: symbol!("mpv_wait_event"),
@@ -161,6 +163,12 @@ impl Player {
     }
 
     pub fn watch_video_processor(&mut self) -> Result<(), String> {
+        for (tag, name) in [(1, c"track-list"), (2, c"chapter-list")] {
+            self.api.check(
+                unsafe { (self.api.observe)(self.handle.as_ptr(), tag, name.as_ptr(), 0) },
+                "Observe media streams",
+            )?;
+        }
         self.api.check(
             unsafe { (self.api.log_level)(self.handle.as_ptr(), c"v".as_ptr()) },
             "Subscribe to media events",
@@ -204,6 +212,10 @@ impl Player {
         }
     }
 
+    pub fn named_property(&self, name: &str) -> Option<String> {
+        self.property(&CString::new(name).ok()?)
+    }
+
     pub fn event(&mut self, timeout: f64) -> Result<PlaybackEvent, String> {
         // mpv owns both event records until the next wait on this handle.
         unsafe {
@@ -214,6 +226,9 @@ impl Player {
                 0 => Ok(PlaybackEvent::Idle),
                 1 => Ok(PlaybackEvent::Shutdown),
                 8 => Ok(PlaybackEvent::Loaded),
+                22 if event.reply_userdata == 1 || event.reply_userdata == 2 => {
+                    Ok(PlaybackEvent::StreamsChanged)
+                }
                 2 => {
                     #[repr(C)]
                     struct Message {
@@ -285,6 +300,7 @@ impl Player {
 }
 
 pub enum PlaybackEvent {
+    StreamsChanged,
     SwapChain { hdr10: bool },
     SuperResolution,
     VideoHdr,

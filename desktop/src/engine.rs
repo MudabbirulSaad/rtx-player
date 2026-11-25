@@ -6,6 +6,13 @@ use std::time::{Duration, Instant};
 
 #[derive(Clone, Default, Serialize)]
 pub struct Snapshot {
+    pub streams: crate::tracks::Streams,
+    pub audio_id: Option<i64>,
+    pub subtitle_id: Option<i64>,
+    pub chapter: Option<i64>,
+    pub audio_delay: f64,
+    pub subtitle_delay: f64,
+    pub fullscreen: bool,
     #[serde(skip)]
     pub source: Option<PathBuf>,
     pub title: Option<String>,
@@ -24,11 +31,17 @@ pub struct Snapshot {
     pub target_peak: Option<f64>,
     pub processed_width: Option<f64>,
     pub processed_height: Option<f64>,
+    pub video_area_width: Option<f64>,
+    pub video_area_height: Option<f64>,
+    pub processing_scale: f64,
     pub requested_rtx: crate::rtx::Effects,
     pub active_rtx: crate::rtx::Effects,
     pub upscale: bool,
     pub rife_available: bool,
     pub factor: f64,
+    pub requested_factor: f64,
+    pub adaptive: bool,
+    pub adaptation: Option<String>,
     pub source_fps: Option<f64>,
     pub avsync: Option<f64>,
     pub dropped: Option<f64>,
@@ -40,6 +53,12 @@ pub struct Snapshot {
 #[derive(Deserialize)]
 #[serde(tag = "kind", content = "value", rename_all = "camelCase")]
 pub enum Control {
+    Adaptive(bool),
+    AudioTrack(i64),
+    SubtitleTrack(Option<i64>),
+    Chapter(u32),
+    AudioDelay(f64),
+    SubtitleDelay(f64),
     Toggle,
     Seek(f64),
     Volume(f64),
@@ -48,6 +67,7 @@ pub enum Control {
     Upscale(bool),
     Interpolate(f64),
     Rtx(crate::rtx::Effects),
+    ProcessingScale(f64),
 }
 
 impl Control {
@@ -60,6 +80,18 @@ impl Control {
         surface: usize,
     ) -> Result<(), String> {
         match self {
+            Self::Adaptive(_) => Ok(()),
+            Self::AudioTrack(id) if id > 0 => p.command(&["set", "aid", &id.to_string()]),
+            Self::SubtitleTrack(None) => p.command(&["set", "sid", "no"]),
+            Self::SubtitleTrack(Some(id)) if id > 0 => p.command(&["set", "sid", &id.to_string()]),
+            Self::Chapter(index) => p.command(&["set", "chapter", &index.to_string()]),
+            Self::AudioDelay(seconds) if (-10.0..=10.0).contains(&seconds) => {
+                p.command(&["set", "audio-delay", &seconds.to_string()])
+            }
+            Self::SubtitleDelay(seconds) if (-60.0..=60.0).contains(&seconds) => {
+                p.command(&["set", "sub-delay", &seconds.to_string()])
+            }
+            Self::ProcessingScale(scale) => rtx.set_scale(p, scale, surface),
             Self::Rtx(settings) => rtx.set(p, settings, surface),
             Self::Interpolate(factor) => {
                 let previous = rtx.requested;
@@ -110,6 +142,7 @@ impl Control {
 }
 
 enum Request {
+    Subtitle(PathBuf),
     Open(PathBuf),
     Control(Control),
 }
@@ -169,6 +202,10 @@ impl Engine {
         self.send(Request::Control(command))
     }
 
+    pub fn subtitle(&self, path: PathBuf) -> Result<(), String> {
+        self.send(Request::Subtitle(path))
+    }
+
     fn send(&self, command: Request) -> Result<(), String> {
         let worker = self
             .worker
@@ -214,6 +251,10 @@ fn run(
     let available = rife.available();
     let mut last = Instant::now();
     let mut error = None;
+    let mut streams = crate::tracks::Streams::default();
+    let mut streams_dirty = true;
+    let mut adaptive = crate::adaptive::Adaptive::default();
+    adaptive.reset(1.0);
     let mut hdr10_swapchain = None;
     if let Some(db) = library {
         match db.preferences() {
@@ -242,7 +283,15 @@ fn run(
     };
     loop {
         match rx.recv_timeout(Duration::from_millis(25)) {
+            Ok(Request::Subtitle(path)) => {
+                error = path
+                    .to_str()
+                    .ok_or_else(|| "Unsupported subtitle path".to_owned())
+                    .and_then(|s| player.command(&["sub-add", s, "select"]))
+                    .err();
+            }
             Ok(Request::Open(path)) => {
+                adaptive.reset(1.0);
                 if let Err(e) = save_progress() {
                     eprintln!("Save playback position: {e}")
                 }
@@ -258,10 +307,23 @@ fn run(
                 }
             }
             Ok(Request::Control(command)) => {
+                let new_rate = match &command {
+                    Control::Adaptive(enabled) => {
+                        adaptive.enabled = *enabled;
+                        None
+                    }
+                    Control::Interpolate(v) => Some(*v),
+                    _ => None,
+                };
                 let preference = matches!(command, Control::Volume(_) | Control::Speed(_));
                 error = command
                     .apply(&mut player, &shader, &mut rife, &mut rtx, surface)
                     .err();
+                if let Some(rate) = new_rate
+                    && error.is_none()
+                {
+                    adaptive.reset(rate);
+                }
                 if preference
                     && error.is_none()
                     && let Some(db) = library
@@ -281,6 +343,7 @@ fn run(
                 Ok(PlaybackEvent::Idle) => break,
                 Ok(PlaybackEvent::Shutdown) => return Ok(()),
                 Ok(PlaybackEvent::Loaded) => {
+                    streams_dirty = true;
                     if let (Some(db), Some(path)) =
                         (library, player.property(c"path").map(PathBuf::from))
                         && path.is_absolute()
@@ -304,6 +367,7 @@ fn run(
                         }
                     }
                 }
+                Ok(PlaybackEvent::StreamsChanged) => streams_dirty = true,
                 Ok(PlaybackEvent::SwapChain { hdr10 }) => hdr10_swapchain = Some(hdr10),
                 Ok(PlaybackEvent::SuperResolution) => {
                     rtx.accepted.super_resolution = rtx.requested.super_resolution
@@ -326,6 +390,10 @@ fn run(
             }
         }
         if last.elapsed() >= Duration::from_millis(200) {
+            if streams_dirty {
+                streams = crate::tracks::Streams::read(&player);
+                streams_dirty = false;
+            }
             if display_check.elapsed() > Duration::from_secs(2) {
                 display = rtx_player::display::for_window(surface).ok();
                 display_check = Instant::now();
@@ -348,6 +416,17 @@ fn run(
                     .filter(|v| v.is_finite())
             };
             let state = Snapshot {
+                streams: streams.clone(),
+                audio_id: player
+                    .property(c"current-tracks/audio/id")
+                    .and_then(|s| s.parse().ok()),
+                subtitle_id: player
+                    .property(c"current-tracks/sub/id")
+                    .and_then(|s| s.parse().ok()),
+                chapter: player.property(c"chapter").and_then(|s| s.parse().ok()),
+                audio_delay: number(c"audio-delay").unwrap_or(0.0),
+                subtitle_delay: number(c"sub-delay").unwrap_or(0.0),
+                fullscreen: false,
                 source: player
                     .property(c"path")
                     .map(PathBuf::from)
@@ -362,6 +441,7 @@ fn run(
                 display_bits: display.as_ref().map(|s| s.bits_per_channel),
                 hdr10_swapchain,
                 requested_rtx: rtx.requested,
+                processing_scale: rtx.scale,
                 active_rtx: rtx.accepted,
                 source_transfer: player.property(c"video-params/gamma"),
                 output_transfer: player.property(c"video-out-params/gamma"),
@@ -370,8 +450,19 @@ fn run(
                 target_peak: number(c"video-target-params/max-luma"),
                 processed_width: number(c"video-out-params/w"),
                 processed_height: number(c"video-out-params/h"),
+                video_area_width: number(c"osd-dimensions/w")
+                    .zip(number(c"osd-dimensions/ml"))
+                    .zip(number(c"osd-dimensions/mr"))
+                    .map(|((w, l), r)| w - l - r),
+                video_area_height: number(c"osd-dimensions/h")
+                    .zip(number(c"osd-dimensions/mt"))
+                    .zip(number(c"osd-dimensions/mb"))
+                    .map(|((h, t), b)| h - t - b),
                 rife_available: available,
                 factor: rife.factor,
+                requested_factor: adaptive.requested,
+                adaptive: adaptive.enabled,
+                adaptation: adaptive.reason.clone(),
                 source_fps: number(c"container-fps"),
                 avsync: number(c"avsync"),
                 dropped: number(c"frame-drop-count"),
@@ -382,7 +473,27 @@ fn run(
                 decoder: player.property(c"hwdec-current"),
                 error: error.clone(),
             };
+            let change = adaptive.observe(
+                Instant::now(),
+                !state.paused,
+                state.position,
+                state.dropped,
+                state.avsync,
+                rife.factor,
+            );
             *shared.lock().map_err(|_| "Playback state unavailable")? = state;
+            if let Some(rate) = change
+                && let Err(e) = Control::Interpolate(rate).apply(
+                    &mut player,
+                    &shader,
+                    &mut rife,
+                    &mut rtx,
+                    surface,
+                )
+            {
+                error = Some(e);
+                adaptive.enabled = false;
+            }
             if saved.elapsed() >= Duration::from_secs(5) {
                 if let Err(e) = save_progress() {
                     error = Some(e);

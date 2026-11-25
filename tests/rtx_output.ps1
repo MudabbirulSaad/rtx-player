@@ -4,7 +4,8 @@ param(
     [Parameter(Mandatory)][ValidateSet('VSR','HDR','VSR-HDR','NativeHDR')][string]$Mode,
     [Parameter(Mandatory)][int]$Width,
     [Parameter(Mandatory)][int]$Height,
-    [switch]$CheckRendererOnly
+    [switch]$CheckRendererOnly,
+    [ValidateSet('1','2','2.5','3','4','5','6')][string]$Interpolation='1'
 )
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient
@@ -43,6 +44,19 @@ try {
     $root = [Windows.Automation.AutomationElement]::FromHandle($window)
     Wait-For { ($c = Find-Control 'Pause') -and $c.Current.IsEnabled } 'Media did not open'
     Select-Toggle 'Playback statistics'
+    if ($Interpolation -ne '1') {
+        (Find-Control 'Enhancements').GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
+        $name=[Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::NameProperty,"RIFE ${Interpolation}×")
+        $radio=[Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ControlTypeProperty,[Windows.Automation.ControlType]::RadioButton)
+        $query=[Windows.Automation.AndCondition]::new($name,$radio)
+        Wait-For {$null -ne $root.FindFirst([Windows.Automation.TreeScope]::Descendants,$query)} 'Interpolation controls unavailable'
+        $item=$root.FindFirst([Windows.Automation.TreeScope]::Descendants,$query)
+        $choice=$item.GetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern)
+        $choice.Select()
+        Wait-For {$choice.Current.IsSelected} 'RIFE selection was not applied'
+        (Find-Control 'Back to player').GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
+        Start-Sleep -Milliseconds 1200
+    }
     if ($Mode -like 'VSR*') { Select-Toggle 'RTX Super Resolution' }
     if ($Mode -in 'HDR','VSR-HDR') { Select-Toggle 'RTX HDR' }
     if ($Mode -like 'VSR*') { $Width *= 2; $Height *= 2 }
@@ -56,6 +70,12 @@ try {
             }
         }
     } finally { Write-Output (Status-Text) }
+    if ($Interpolation -ne '1') {
+        $timing=$root.FindAll([Windows.Automation.TreeScope]::Descendants,[Windows.Automation.Condition]::TrueCondition) |
+            ForEach-Object { $_.Current.Name } | Where-Object { $_ -match ' · Source .* · Filter ' } |Select-Object -First 1
+        if ($timing -notmatch 'Source ([\d.]+) fps · Filter ([\d.]+) fps' -or [Math]::Abs([double]$Matches[1]*[double]$Interpolation-[double]$Matches[2]) -gt 1) {throw "Unexpected interpolation timing: $timing"}
+        Write-Output $timing
+    }
     & python "$PSScriptRoot/visible_playback.py" --pid $app.Id
     if ($LASTEXITCODE) { throw 'Visible playback check failed' }
 } finally {

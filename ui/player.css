@@ -31,4 +31,9 @@ select { background: #202528; font-variant-numeric: tabular-nums; }
 .library li button { width:100%; min-height:44px; justify-content:flex-start; }
 .library li span { margin-left:auto; }
 .confirm { margin-top:14px; }
+.enhance fieldset { display:flex; flex-wrap:wrap; align-items:center; gap:12px; padding:12px 0 18px; border-top:1px solid #364044; }
+.enhance legend { padding-right:10px; font-weight:600; }
+.enhance .rate { display:flex; align-items:center; gap:6px; min-height:32px; }
+.enhance input[type=number] { width:5em; padding:4px 8px; border:1px solid #515a60; border-radius:4px; }
+.enhance button[aria-current=true] { background:#253b30; color:#b0edcd; }
 button[aria-pressed="true"] { color: #b0edcd; background: #253b30; }

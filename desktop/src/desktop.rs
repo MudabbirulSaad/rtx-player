@@ -9,8 +9,10 @@ use tauri::webview::WebviewBuilder;
 use tauri::window::WindowBuilder;
 use tauri::{Manager, PhysicalPosition, PhysicalSize, State, WebviewUrl, WindowEvent};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, MoveWindow, WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_VISIBLE,
+    CreateWindowExW, GetCursorPos, MoveWindow, WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS,
+    WS_VISIBLE,
 };
+use windows_sys::Win32::{Foundation::POINT, Graphics::Gdi::ScreenToClient};
 
 #[tauri::command]
 async fn open_media(engine: State<'_, Engine>) -> Result<(), String> {
@@ -30,15 +32,52 @@ fn transport(engine: State<'_, Engine>, command: Control) -> Result<(), String> 
 }
 
 #[tauri::command]
-fn playback_state(engine: State<'_, Engine>) -> Result<Snapshot, String> {
-    engine.state()
+fn playback_state(window: tauri::Window, engine: State<'_, Engine>) -> Result<Snapshot, String> {
+    let mut snapshot = engine.state()?;
+    let view = window.state::<Surfaces>();
+    if view.fullscreen.load(Ordering::Relaxed) {
+        snapshot.fullscreen = true;
+        let size = window.inner_size().map_err(|e| e.to_string())?;
+        let scale = window.scale_factor().map_err(|e| e.to_string())?;
+        let mut pos = POINT::default();
+        let (_, strip) = layout(size, scale);
+        let hwnd = window.hwnd().map_err(|e| e.to_string())?.0;
+        if unsafe { GetCursorPos(&mut pos) != 0 && ScreenToClient(hwnd, &mut pos) != 0 } {
+            let bottom = pos.x >= 0
+                && pos.x < size.width as i32
+                && pos.y >= size.height.saturating_sub(strip) as i32
+                && pos.y < size.height as i32;
+            if view.hover.swap(bottom, Ordering::Relaxed) != bottom {
+                view.arrange(size, scale).map_err(|e| e.to_string())?;
+            }
+        }
+    }
+    Ok(snapshot)
 }
 
 #[tauri::command]
 fn fullscreen(window: tauri::Window) -> Result<(), String> {
-    window
-        .set_fullscreen(!window.is_fullscreen().map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())
+    let next = !window.is_fullscreen().map_err(|e| e.to_string())?;
+    window.set_fullscreen(next).map_err(|e| e.to_string())?;
+    let view = window.state::<Surfaces>();
+    view.fullscreen.store(next, Ordering::Relaxed);
+    view.keyboard.store(false, Ordering::Relaxed);
+    view.arrange(
+        window.inner_size().map_err(|e| e.to_string())?,
+        window.scale_factor().map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn reveal_controls(window: tauri::Window) -> Result<(), String> {
+    let view = window.state::<Surfaces>();
+    view.keyboard.store(true, Ordering::Relaxed);
+    view.arrange(
+        window.inner_size().map_err(|e| e.to_string())?,
+        window.scale_factor().map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())
 }
 
 fn layout(size: PhysicalSize<u32>, scale: f64) -> (u32, u32) {
@@ -50,22 +89,34 @@ struct Surfaces {
     video: usize,
     controls: tauri::Webview,
     expanded: AtomicBool,
+    fullscreen: AtomicBool,
+    hover: AtomicBool,
+    keyboard: AtomicBool,
 }
 impl Surfaces {
     fn arrange(&self, size: PhysicalSize<u32>, scale: f64) -> tauri::Result<()> {
         if size.width == 0 || size.height == 0 {
             return Ok(());
         }
-        let (video, controls) = if self.expanded.load(Ordering::Relaxed) {
-            (0, size.height)
+        let (top, strip) = layout(size, scale);
+        let (video, bar_top, controls) = if self.expanded.load(Ordering::Relaxed) {
+            (0, 0, size.height)
+        } else if self.fullscreen.load(Ordering::Relaxed) {
+            let height =
+                if self.hover.load(Ordering::Relaxed) || self.keyboard.load(Ordering::Relaxed) {
+                    strip
+                } else {
+                    1
+                };
+            (size.height, size.height - height, height)
         } else {
-            layout(size, scale)
+            (top, top, strip)
         };
         unsafe {
             MoveWindow(self.video as _, 0, 0, size.width as i32, video as i32, 1);
         }
         self.controls.set_bounds(tauri::Rect {
-            position: PhysicalPosition::new(0, video as i32).into(),
+            position: PhysicalPosition::new(0, bar_top as i32).into(),
             size: PhysicalSize::new(size.width, controls).into(),
         })
     }
@@ -90,6 +141,7 @@ pub fn run() -> tauri::Result<()> {
     tauri::Builder::default()
         .manage(Exports::default())
         .setup(|app| {
+            app.manage(crate::gpu::Gpus::start()?);
             let window = WindowBuilder::new(app, "player")
                 .title("RTX Player")
                 .inner_size(1000.0, 680.0)
@@ -128,6 +180,9 @@ pub fn run() -> tauri::Result<()> {
                 video: surface,
                 controls: bar,
                 expanded: AtomicBool::new(false),
+                fullscreen: AtomicBool::new(false),
+                hover: AtomicBool::new(false),
+                keyboard: AtomicBool::new(false),
             });
             let executable = std::env::current_exe()?;
             let dir = executable
@@ -196,12 +251,15 @@ pub fn run() -> tauri::Result<()> {
         })
         .invoke_handler(tauri::generate_handler![
             expand_controls,
+            reveal_controls,
             crate::library::library_entries,
             crate::library::library_preferences,
             crate::library::set_library_preferences,
             crate::library::open_recent,
             crate::library::clear_history,
             crate::export::start_export,
+            crate::tracks::open_subtitle,
+            crate::gpu::gpu_stats,
             crate::export::export_status,
             crate::export::cancel_export,
             open_media,

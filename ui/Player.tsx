@@ -3,20 +3,25 @@ import { invoke } from '@tauri-apps/api/core'
 import { Activity, FolderOpen, Maximize, Pause, Play, Volume2 } from 'lucide-react'
 import { ExportPanel } from './ExportPanel'
 import { LibraryPanel } from './LibraryPanel'
+import { Enhancements } from './Enhancements'
+import {Tracks, type TrackCommand,type TrackState} from './Tracks'
 import './player.css'
 
 type Effects = { super_resolution: boolean; hdr: boolean }
-type Playback = {
+type Playback = TrackState & {
+  fullscreen:boolean
   title: string | null; position: number | null; duration: number | null
   source_fps: number | null; avsync: number | null; dropped: number | null
   rife_available: boolean; factor: number; filtered_fps: number | null
+  requested_factor:number;adaptive:boolean;adaptation:string|null
   requested_rtx: Effects; active_rtx: Effects; display_hdr: boolean | null; display_bits: number | null; hdr10_swapchain: boolean | null
-  processed_width: number | null; processed_height: number | null
+  processed_width: number | null; processed_height: number | null; processing_scale:number
+  video_area_width:number|null;video_area_height:number|null
   source_transfer: string | null; output_transfer: string | null
   target_transfer: string | null; target_primaries: string | null; target_peak: number | null
   upscale: boolean; paused: boolean; volume: number; speed: number; decoder: string | null; error: string | null
 }
-type Command = { kind: 'rtx'; value: Effects } | { kind: 'upscale'; value: boolean } | { kind: 'toggle' | 'mute' } | { kind: 'volume' | 'seek' | 'speed' | 'interpolate'; value: number }
+type Command = TrackCommand | { kind: 'rtx'; value: Effects } | { kind: 'upscale'|'adaptive'; value: boolean } | { kind: 'toggle' | 'mute' } | { kind: 'volume' | 'seek' | 'speed' | 'interpolate' | 'processingScale'; value: number }
 
 function clock(seconds: number) {
   const t = Math.floor(Math.max(0, seconds))
@@ -30,6 +35,8 @@ export function Player() {
   const [issue, setIssue] = useState('')
   const [exporting, setExporting] = useState(false)
   const [library, setLibrary] = useState(false)
+  const [enhancements,setEnhancements]=useState(false)
+  const [tracks,setTracks]=useState(false)
   const [stats, setStats] = useState(false)
   const [scrub, setScrub] = useState<number | null>(null)
   const [volume, setVolume] = useState<number | null>(null)
@@ -52,7 +59,11 @@ export function Player() {
   }, [])
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.key.toLowerCase() === 'o') {
+      if (state?.fullscreen && e.key==='Escape') {
+        e.preventDefault();void request('fullscreen')
+      } else if(state?.fullscreen && e.key==='Tab') {
+        void request('reveal_controls')
+      } else if (e.ctrlKey && e.key.toLowerCase() === 'o') {
         e.preventDefault(); void request('open_media')
       } else if (e.key === ' ' && e.target === document.body && state?.title) {
         e.preventDefault(); void transport({ kind: 'toggle' })
@@ -60,7 +71,7 @@ export function Player() {
     }
     window.addEventListener('keydown', key)
     return () => window.removeEventListener('keydown', key)
-  }, [request, transport, state?.title])
+  }, [request, transport, state?.title,state?.fullscreen])
 
   useEffect(() => {
     if (scrub === null) return
@@ -91,8 +102,17 @@ export function Player() {
     `Target ${state.target_transfer ?? '—'} ${state.target_primaries ?? '—'}` + (state.target_peak == null ? '' : ` ${Math.round(state.target_peak)} nits`),
     `Windows ${state.display_hdr == null ? 'unknown' : state.display_hdr ? 'HDR' : 'SDR'}` + (state.display_bits ? ` ${state.display_bits}-bit` : ''),
     ...(state.hdr10_swapchain ? ['HDR10 swap chain'] : []),
+    ...(state.video_area_width && state.video_area_height ? [`Video area ${state.video_area_width}×${state.video_area_height}`] : []),
   ].join(' · ')
   if (library) return <LibraryPanel close={()=>setLibrary(false)}/>
+  if(tracks&&state) return <Tracks state={state} close={()=>setTracks(false)} send={v=>void transport(v)} add={()=>void request('open_subtitle')} error={issue || state.error || ''}/>
+  if (enhancements) return <Enhancements close={()=>setEnhancements(false)} issue={setIssue}
+    adaptive={Boolean(state?.adaptive)} requested={state?.requested_factor||1} reason={state?.adaptation??null} changeAdaptive={v=>void transport({kind:'adaptive',value:v})} error={issue||state?.error||''}
+    playing={playing} interpolationAvailable={playing && Boolean(state?.rife_available) && sdrSource} hdrAvailable={playing && sdrSource && Boolean(state?.display_hdr)}
+    factor={state?.factor || 1} scale={state?.processing_scale || 2} shader={Boolean(state?.upscale)} vsr={Boolean(active?.super_resolution)} hdr={Boolean(active?.hdr)}
+    rate={v=>void transport({kind:'interpolate',value:v})} resize={v=>void transport({kind:'processingScale',value:v})}
+    anime={()=>void transport({kind:'upscale',value:!state?.upscale})} nvidia={()=>void transport({kind:'rtx',value:{...effects,super_resolution:!effects.super_resolution}})}
+    convert={()=>void transport({kind:'rtx',value:{...effects,hdr:!effects.hdr}})} timing={timing} output={output}/>
   if (exporting) return <ExportPanel close={()=>setExporting(false)}/>
   return <section className="shell flex flex-col justify-center gap-2 px-5" aria-label="Playback controls">
     <div className="flex items-center justify-between gap-3">
@@ -109,8 +129,9 @@ export function Player() {
         {state?.paused || !playing ? <Play/> : <Pause/>}</button>
       <button onClick={() => void request('open_media')} title="Open file (Ctrl+O)"><FolderOpen/>Open</button>
       <button onClick={()=>setLibrary(true)}>Library</button>
+      <button disabled={!playing} onClick={()=>setTracks(true)}>Tracks</button>
       <button disabled={!playing} onClick={()=>setExporting(true)}>Export</button>
-      <span className="error truncate" role="status" title={issue || state?.error || undefined}>{issue || state?.error}</span>
+      <span className="error truncate" role="status" title={issue || state?.error || state?.adaptation || undefined}>{issue || state?.error || state?.adaptation}</span>
       <div className="ml-auto flex items-center gap-2">
         <button aria-label="Playback statistics" aria-pressed={stats} onClick={() => setStats(!stats)}><Activity/></button>
         <button aria-label="Toggle mute" disabled={!playing} onClick={() => void transport({kind:'mute'})}><Volume2/></button>
@@ -126,8 +147,9 @@ export function Player() {
       </div>
     </div>
     <div className="enhancements flex items-center gap-2" role="group" aria-label="Video enhancements">
+      <button onClick={()=>setEnhancements(true)}>Enhancements</button>
       <button aria-pressed={Boolean(state?.upscale)} disabled={!playing} title="Anime4K neural upscaling for enlarged video" onClick={() => void transport({kind:'upscale',value:!state?.upscale})}>Anime4K</button>
-      <button aria-label="RTX Super Resolution" aria-pressed={Boolean(active?.super_resolution)} disabled={!playing} title="Apply 2× NVIDIA video super resolution" onClick={() => void transport({kind:'rtx',value:{...effects,super_resolution:!effects.super_resolution}})}>RTX VSR</button>
+      <button aria-label="RTX Super Resolution" aria-pressed={Boolean(active?.super_resolution)} disabled={!playing} title={`Apply ${state?.processing_scale || 2}× NVIDIA video super resolution`} onClick={() => void transport({kind:'rtx',value:{...effects,super_resolution:!effects.super_resolution}})}>RTX VSR</button>
       <button aria-pressed={Boolean(active?.hdr)} disabled={!playing || (!effects.hdr && (!sdrSource || !state?.display_hdr))} title={hdrHint} onClick={() => void transport({kind:'rtx',value:{...effects,hdr:!effects.hdr}})}>RTX HDR</button>
       <select aria-label="Frame interpolation" disabled={!playing || !state?.rife_available || !sdrSource} title="RIFE interpolation requires the optional provider and SDR video" value={state?.factor || 1} onChange={e => void transport({kind:'interpolate',value:Number(e.target.value)})}>
         <option value={1}>Original FPS</option>{[2,2.5,3,4,5,6].map(n => <option key={n} value={n}>RIFE {n}×</option>)}
