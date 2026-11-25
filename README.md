@@ -26,13 +26,15 @@ Close the desktop app and run the following command to add the NCNN/Vulkan RIFE 
 python -m scripts.fetch_rife target/debug/rtx-player-desktop.exe
 ```
 
-Open an SDR video and choose a RIFE multiplier in the transport bar. The provider uses copy-back decoding, detects scene cuts from luma differences, and divides the source frame durations. The statistics control shows estimated filter output FPS, dropped frames and A/V offset. Filter FPS measures timestamp cadence. Physical display throughput requires separate measurement. Reopening a file resets interpolation. To remove the optional runtime, close the app and delete its providers/rife directory.
+Open an SDR video and choose a RIFE multiplier in the transport bar or under Enhancements. Use 2.5× for 24 to 60 fps. The provider uses copy-back decoding, detects scene cuts from luma differences, and divides the source frame durations. The statistics control shows estimated filter output FPS, dropped frames and A/V offset. Reopening a file resets interpolation. To remove the optional runtime, close the app and delete its providers/rife directory.
+
+Under Enhancements, enable **Reduce interpolation when playback falls behind** to step down after sustained frame drops or A/V drift. The player shows the reason for each reduction and offers a retry. Device utilization, memory, power and temperature appear when the NVIDIA driver supplies them. [Reference measurements and display timing](docs/performance.md)
 
 The GNU LLVM toolchain may link libunwind.dll dynamically. Place the matching DLL from that toolchain beside the executable when running outside the build shell.
 
 ## NVIDIA video processing
 
-RTX VSR requests 2× spatial scaling from the NVIDIA D3D11 video processor. Selecting it turns off Anime4K. RTX HDR converts supported SDR sources on an active Windows HDR output. The app queries the display that contains its video window. On Windows versions without the advanced color mode query, the HDR conversion control is unavailable. Windows HDR mode remains under user control.
+RTX VSR requests spatial scaling from the NVIDIA D3D11 video processor. Select a scale from 1.5× to 4× under Enhancements. Selecting VSR turns off Anime4K. RTX HDR converts supported SDR sources on an active Windows HDR output. The app queries the display that contains its video window. On Windows versions without the advanced color mode query, the HDR conversion control is unavailable. Windows HDR mode remains under user control.
 
 An RTX toggle lights up when the driver accepts its extension. Playback statistics report the processed dimensions and transfer function, the renderer target, and the Windows display mode. The HDR10 swap chain indicator requires a renderer report of 10-bit RGB with BT.2020 primaries and the PQ transfer function. The NVIDIA filter supplies a nominal peak luminance of 1000 nits for converted content.
 
@@ -41,6 +43,8 @@ An RTX toggle lights up when the driver accepts its extension. Playback statisti
 For a development build, install the pinned encoder with `python -m scripts.fetch_export target/debug/rtx-player-desktop.exe`. Open an SDR video and choose Export. Select CPU H.264 or NVIDIA NVENC, set an output height and quality, and optionally enable denoising. Lower quality numbers retain more detail. The encoder preserves video timestamps and chapters and transcodes audio to AAC. MKV copies subtitles and attachments. MP4 converts text subtitles to timed text. Use MKV for bitmap subtitles. The app checks the temporary file's duration, resolution and audio before saving it under a new name. Cancelling removes the incomplete file.
 
 ## Library and settings
+
+Choose Tracks to switch audio or subtitle streams, open an external subtitle file, adjust their timing or seek to a chapter.
 
 Open Library and enable **Remember recent videos** to save playback positions on this computer. Search by title or select a recent video to continue watching. Clearing history removes the saved entries. Volume and playback speed are saved separately. The app normally stores its SQLite database in its local application data directory. An empty `portable.mode` file beside the executable directs the database to a `data` folder beside it.
 
