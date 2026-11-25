@@ -13,6 +13,12 @@ pub struct Snapshot {
     pub volume: f64,
     pub speed: f64,
     pub upscale: bool,
+    pub rife_available: bool,
+    pub factor: u8,
+    pub source_fps: Option<f64>,
+    pub avsync: Option<f64>,
+    pub dropped: Option<f64>,
+    pub filtered_fps: Option<f64>,
     pub decoder: Option<String>,
     pub error: Option<String>,
 }
@@ -26,11 +32,18 @@ pub enum Control {
     Speed(f64),
     Mute,
     Upscale(bool),
+    Interpolate(u8),
 }
 
 impl Control {
-    fn apply(self, p: &mut Player, shader: &std::path::Path) -> Result<(), String> {
+    fn apply(
+        self,
+        p: &mut Player,
+        shader: &std::path::Path,
+        rife: &mut crate::rife::Rife,
+    ) -> Result<(), String> {
         match self {
+            Self::Interpolate(factor) => rife.set(p, factor),
             Self::Upscale(true) => {
                 if !shader.is_file() {
                     return Err(
@@ -157,18 +170,23 @@ fn run(
     shared: &Mutex<Snapshot>,
 ) -> Result<(), String> {
     let mut player = Player::embedded(&runtime, surface)?;
+    let mut rife = crate::rife::Rife::new(runtime.parent().ok_or("Missing application directory")?);
+    let available = rife.available();
     let mut last = Instant::now();
     let mut error = None;
     loop {
         match rx.recv_timeout(Duration::from_millis(25)) {
             Ok(Request::Open(path)) => {
+                if rife.factor > 1 {
+                    rife.set(&mut player, 1)?;
+                }
                 error = player.load(&path).err();
                 if error.is_none() {
                     error = player.command(&["set", "pause", "no"]).err();
                 }
             }
             Ok(Request::Control(command)) => {
-                if let Err(message) = command.apply(&mut player, &shader) {
+                if let Err(message) = command.apply(&mut player, &shader, &mut rife) {
                     error = Some(message);
                 }
             }
@@ -200,6 +218,12 @@ fn run(
                 paused: player.property(c"pause").as_deref() == Some("yes"),
                 volume: number(c"volume").unwrap_or(100.0),
                 speed: number(c"speed").unwrap_or(1.0),
+                rife_available: available,
+                factor: rife.factor,
+                source_fps: number(c"container-fps"),
+                avsync: number(c"avsync"),
+                dropped: number(c"frame-drop-count"),
+                filtered_fps: number(c"estimated-vf-fps"),
                 upscale: player
                     .property(c"glsl-shaders")
                     .is_some_and(|v| !v.is_empty()),

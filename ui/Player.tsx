@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
-import { FolderOpen, Maximize, Pause, Play, Volume2 } from 'lucide-react'
+import { Activity, FolderOpen, Maximize, Pause, Play, Volume2 } from 'lucide-react'
 import './player.css'
 
 type Playback = {
   title: string | null; position: number | null; duration: number | null
+  source_fps: number | null; avsync: number | null; dropped: number | null
+  rife_available: boolean; factor: number; filtered_fps: number | null
   upscale: boolean; paused: boolean; volume: number; speed: number; decoder: string | null; error: string | null
 }
-type Command = { kind: 'upscale'; value: boolean } | { kind: 'toggle' | 'mute' } | { kind: 'volume' | 'seek' | 'speed'; value: number }
+type Command = { kind: 'upscale'; value: boolean } | { kind: 'toggle' | 'mute' } | { kind: 'volume' | 'seek' | 'speed' | 'interpolate'; value: number }
 
 function clock(seconds: number) {
   const t = Math.floor(Math.max(0, seconds))
@@ -19,6 +21,7 @@ function clock(seconds: number) {
 export function Player() {
   const [state, setState] = useState<Playback | null>(null)
   const [issue, setIssue] = useState('')
+  const [stats, setStats] = useState(false)
   const [scrub, setScrub] = useState<number | null>(null)
   const [volume, setVolume] = useState<number | null>(null)
   const request = useCallback(async (name: string, args?: Record<string, unknown>) => {
@@ -64,7 +67,10 @@ export function Player() {
   const at = scrub ?? state?.position ?? 0
   return <section className="shell flex flex-col justify-center gap-2 px-5" aria-label="Playback controls">
     <div className="flex items-center justify-between gap-3">
-      <span className="title truncate" title={state?.title ?? undefined}>{state?.title ?? 'Open a video'}</span>
+      {stats && state ? <span className="metrics truncate" aria-label="Playback statistics">
+        {state.decoder || 'Decoder unavailable'} · Source {state.source_fps?.toFixed(2) ?? '—'} fps · Filter {state.filtered_fps?.toFixed(2) ?? '—'} fps · Drops {state.dropped ?? '—'} · A/V {state.avsync == null ? '—' : Math.round(state.avsync * 1000)} ms
+      </span> :
+      <span className="title truncate" title={state?.title ?? undefined}>{state?.title ?? 'Open a video'}</span>}
       <span className="time">{clock(at)} <span>/</span> {clock(duration)}</span>
     </div>
     <input type="range" className="timeline" aria-label="Seek" min={0} max={duration || 1} step={0.1}
@@ -76,8 +82,12 @@ export function Player() {
         {state?.paused || !playing ? <Play/> : <Pause/>}</button>
       <button onClick={() => void request('open_media')} title="Open file (Ctrl+O)"><FolderOpen/>Open</button>
       <button aria-pressed={Boolean(state?.upscale)} disabled={!playing} title="Anime4K neural upscaling for enlarged video" onClick={() => void transport({kind: 'upscale', value: !state?.upscale})}>Anime4K</button>
+      <select aria-label="Frame interpolation" disabled={!playing || !state?.rife_available} title={state?.rife_available ? "RIFE frame interpolation" : "Install the optional RIFE provider to enable interpolation"} value={state?.factor || 1} onChange={e => void transport({kind:"interpolate", value:Number(e.target.value)})}>
+        <option value={1}>Original FPS</option>{[2,3,4,5,6].map(n => <option key={n} value={n}>RIFE {n}×</option>)}
+      </select>
       <span className="error truncate" role="status" title={issue || state?.error || undefined}>{issue || state?.error}</span>
       <div className="ml-auto flex items-center gap-2">
+        <button aria-label="Playback statistics" aria-pressed={stats} onClick={() => setStats(!stats)}><Activity/></button>
         <button aria-label="Toggle mute" disabled={!playing} onClick={() => void transport({kind:'mute'})}><Volume2/></button>
         <input className="volume" aria-label="Volume" type="range" min={0} max={100}
           disabled={!playing} value={volume ?? state?.volume ?? 100}

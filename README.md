@@ -18,6 +18,18 @@ Open a file with the Open button or Ctrl+O in the controls. You can also pass a 
 
 For the command-line player, use `cargo build --release --locked -p rtx-player`, fetch its runtime into the release directory, and run `rtx-player.exe <file>`. Space pauses, the arrow keys seek, and F toggles fullscreen in that window.
 
+## Optional frame interpolation
+
+Close the desktop app and run the following command to add the NCNN/Vulkan RIFE provider to this build. It downloads a private copy of embedded CPython, the VapourSynth wheel, the Windows filter and the pinned RIFE v4.25-lite model. The installer verifies each download and refuses to replace an existing provider directory.
+
+```powershell
+python -m scripts.fetch_rife target/debug/rtx-player-desktop.exe
+```
+
+Open an SDR video and choose a RIFE multiplier in the transport bar. The provider uses copy-back decoding, detects scene cuts from luma differences, and divides the source frame durations. The statistics control shows estimated filter output FPS, dropped frames and A/V offset. Filter FPS measures timestamp cadence. Physical display throughput requires separate measurement. Reopening a file resets interpolation. To remove the optional runtime, close the app and delete its providers/rife directory.
+
+The GNU LLVM toolchain may link libunwind.dll dynamically. Place the matching DLL from that toolchain beside the executable when running outside the build shell.
+
 ## Tests
 
 ```powershell
