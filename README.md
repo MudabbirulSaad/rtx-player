@@ -30,6 +30,12 @@ Open an SDR video and choose a RIFE multiplier in the transport bar. The provide
 
 The GNU LLVM toolchain may link libunwind.dll dynamically. Place the matching DLL from that toolchain beside the executable when running outside the build shell.
 
+## NVIDIA video processing
+
+RTX VSR requests 2× spatial scaling from the NVIDIA D3D11 video processor. Selecting it turns off Anime4K. RTX HDR converts supported SDR sources on an active Windows HDR output. The app queries the display that contains its video window. On Windows versions without the advanced color mode query, the HDR conversion control is unavailable. Windows HDR mode remains under user control.
+
+An RTX toggle lights up when the driver accepts its extension. Playback statistics report the processed dimensions and transfer function, the renderer target, and the Windows display mode. The HDR10 swap chain indicator requires a renderer report of 10-bit RGB with BT.2020 primaries and the PQ transfer function. The NVIDIA filter supplies a nominal peak luminance of 1000 nits for converted content.
+
 ## Tests
 
 ```powershell
@@ -46,3 +52,5 @@ python tests/visible_playback.py target/debug/rtx-player-desktop.exe motion.mp4
 ```
 
 The pixel test checks for saturated colors and movement at screen coordinates owned by the player process. The control test invokes the accessible buttons and checks that the playback position stops and resumes. For a separate Core Audio check, install the test packages in tests/audio-requirements.txt into a virtual environment and run `python tests/audio_playback.py target/debug/rtx-player-desktop.exe motion.mp4`.
+
+For display timing, capture the player process with PresentMon 2.x and run `python scripts/presentmon_summary.py trace.csv`. The report includes displayed FPS, display intervals, GPU busy time and present-to-display latency. Use `--chain` to select the video swap chain when the trace contains multiple chains.

@@ -25,6 +25,14 @@ def sample_window(pid):
 
     user.EnumWindows(collect, 0)
     for hwnd in windows:
+        title = ct.create_unicode_buffer(128)
+        user.GetWindowTextW(hwnd, title, len(title))
+        if title.value != "RTX Player":
+            continue
+        user.FindWindowExW.argtypes = [wt.HWND, wt.HWND, wt.LPCWSTR, wt.LPCWSTR]
+        user.FindWindowExW.restype = wt.HWND
+        # The desktop host puts WebView controls in a separate sibling window.
+        hwnd = user.FindWindowExW(hwnd, None, "Static", None) or hwnd
         rect = wt.RECT()
         user.GetClientRect(hwnd, ct.byref(rect))
         if rect.right < 160 or rect.bottom < 90:
@@ -57,31 +65,41 @@ def sample_window(pid):
     return []
 
 
-def verify(exe, clip):
+def verify_pid(pid, alive):
     ct.windll.user32.SetProcessDPIAware()
+    previous = None
+    deadline = time.monotonic() + 12
+    while time.monotonic() < deadline:
+        if not alive():
+            raise RuntimeError("Player exited during visible-frame verification")
+        pixels = sample_window(pid)
+        if pixels and sum(max(p)-min(p) > 80 for p in pixels) > len(pixels)//3:
+            if previous and sum(max(abs(a-b) for a, b in zip(p, q)) > 35
+                                for p, q in zip(previous, pixels)) >= 4:
+                print(f"Visible moving colors verified at {len(pixels)} sample points")
+                return
+            previous = pixels
+        time.sleep(0.3)
+    raise RuntimeError("Expected a visible, unobscured, moving color pattern")
+
+
+def verify(exe, clip):
     with subprocess.Popen([exe, clip]) as player:
         try:
-            previous = None
-            deadline = time.monotonic() + 12
-            while time.monotonic() < deadline:
-                if player.poll() is not None:
-                    raise RuntimeError(f"Player exited early with code {player.returncode}")
-                pixels = sample_window(player.pid)
-                if pixels and sum(max(p)-min(p) > 80 for p in pixels) > len(pixels)//3:
-                    if previous and sum(max(abs(a-b) for a, b in zip(p, q)) > 35
-                                        for p, q in zip(previous, pixels)) >= 4:
-                        print(f"Visible moving colors verified at {len(pixels)} sample points")
-                        return
-                    previous = pixels
-                time.sleep(0.3)
-            raise RuntimeError("Expected a visible, unobscured, moving color pattern")
+            verify_pid(player.pid, lambda: player.poll() is None)
         finally:
             close_player(player)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("exe", type=Path)
-    parser.add_argument("clip", type=Path)
+    parser.add_argument("exe", type=Path, nargs="?")
+    parser.add_argument("clip", type=Path, nargs="?")
+    parser.add_argument("--pid", type=int, help="inspect an already playing test window")
     args = parser.parse_args()
-    verify(args.exe.resolve(strict=True), args.clip.resolve(strict=True))
+    if args.pid and not args.exe and not args.clip:
+        verify_pid(args.pid, lambda: True)
+    elif args.exe and args.clip and not args.pid:
+        verify(args.exe.resolve(strict=True), args.clip.resolve(strict=True))
+    else:
+        parser.error("Provide a player and clip or a running player PID")

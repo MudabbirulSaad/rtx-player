@@ -37,7 +37,7 @@ fn fullscreen(window: tauri::Window) -> Result<(), String> {
 }
 
 fn layout(size: PhysicalSize<u32>, scale: f64) -> (u32, u32) {
-    let controls = ((112.0 * scale).round() as u32).clamp(1, size.height.max(1));
+    let controls = ((150.0 * scale).round() as u32).clamp(1, size.height.max(1));
     (size.height.saturating_sub(controls), controls)
 }
 
@@ -149,7 +149,7 @@ mod tests {
     use super::*;
     #[test]
     fn control_surface_stays_inside_client_at_high_dpi() {
-        assert_eq!(layout(PhysicalSize::new(800, 700), 1.5), (532, 168));
+        assert_eq!(layout(PhysicalSize::new(800, 700), 1.5), (475, 225));
         assert_eq!(layout(PhysicalSize::new(800, 100), 2.0), (0, 100));
     }
 }

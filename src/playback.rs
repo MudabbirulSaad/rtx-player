@@ -25,6 +25,7 @@ struct Api {
     initialize: unsafe extern "C" fn(Handle) -> c_int,
     option: unsafe extern "C" fn(Handle, *const c_char, *const c_char) -> c_int,
     command: unsafe extern "C" fn(Handle, *const *const c_char) -> c_int,
+    log_level: unsafe extern "C" fn(Handle, *const c_char) -> c_int,
     get: unsafe extern "C" fn(Handle, *const c_char) -> *mut c_char,
     free: unsafe extern "C" fn(*mut c_void),
     wait: unsafe extern "C" fn(Handle, f64) -> *const Event,
@@ -56,6 +57,7 @@ impl Api {
                 initialize: symbol!("mpv_initialize"),
                 option: symbol!("mpv_set_option_string"),
                 command: symbol!("mpv_command"),
+                log_level: symbol!("mpv_request_log_messages"),
                 get: symbol!("mpv_get_property_string"),
                 free: symbol!("mpv_free"),
                 wait: symbol!("mpv_wait_event"),
@@ -135,6 +137,13 @@ impl Player {
         Ok(player)
     }
 
+    pub fn watch_video_processor(&mut self) -> Result<(), String> {
+        self.api.check(
+            unsafe { (self.api.log_level)(self.handle.as_ptr(), c"v".as_ptr()) },
+            "Subscribe to media events",
+        )
+    }
+
     pub fn load(&mut self, path: &Path) -> Result<(), String> {
         self.command(&[
             "loadfile",
@@ -182,6 +191,43 @@ impl Player {
                 0 => Ok(PlaybackEvent::Idle),
                 1 => Ok(PlaybackEvent::Shutdown),
                 8 => Ok(PlaybackEvent::Loaded),
+                2 => {
+                    #[repr(C)]
+                    struct Message {
+                        prefix: *const c_char,
+                        level: *const c_char,
+                        text: *const c_char,
+                    }
+                    let Some(msg) = event.data.cast::<Message>().as_ref() else {
+                        return Ok(PlaybackEvent::Other);
+                    };
+                    // The runtime owns both strings until the next wait.
+                    let prefix = CStr::from_ptr(msg.prefix).to_bytes();
+                    let text = CStr::from_ptr(msg.text).to_string_lossy();
+                    if prefix == b"vo/gpu-next/libplacebo"
+                        && text.contains("swap chain configuration")
+                    {
+                        return Ok(PlaybackEvent::SwapChain {
+                            hdr10: text.contains("R10G10B10A2_UNORM")
+                                && text.contains("RGB_FULL_G2084_NONE_P2020"),
+                        });
+                    }
+                    if prefix == b"d3d11vpp" {
+                        return Ok(match text.trim() {
+                            "NVIDIA RTX Super Resolution enabled." => {
+                                PlaybackEvent::SuperResolution
+                            }
+                            "NVIDIA RTX Video HDR enabled." => PlaybackEvent::VideoHdr,
+                            _ if text.contains("Failed to enable NVIDIA")
+                                || text.contains("NVIDIA RTX Video HDR not supported") =>
+                            {
+                                PlaybackEvent::ExtensionFailed
+                            }
+                            _ => PlaybackEvent::Other,
+                        });
+                    }
+                    Ok(PlaybackEvent::Other)
+                }
                 7 => {
                     let end = event
                         .data
@@ -216,6 +262,10 @@ impl Player {
 }
 
 pub enum PlaybackEvent {
+    SwapChain { hdr10: bool },
+    SuperResolution,
+    VideoHdr,
+    ExtensionFailed,
     Idle,
     Loaded,
     Ended,

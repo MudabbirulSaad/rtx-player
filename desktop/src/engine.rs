@@ -12,6 +12,18 @@ pub struct Snapshot {
     pub paused: bool,
     pub volume: f64,
     pub speed: f64,
+    pub display_hdr: Option<bool>,
+    pub display_bits: Option<u32>,
+    pub hdr10_swapchain: Option<bool>,
+    pub source_transfer: Option<String>,
+    pub output_transfer: Option<String>,
+    pub target_transfer: Option<String>,
+    pub target_primaries: Option<String>,
+    pub target_peak: Option<f64>,
+    pub processed_width: Option<f64>,
+    pub processed_height: Option<f64>,
+    pub requested_rtx: crate::rtx::Effects,
+    pub active_rtx: crate::rtx::Effects,
     pub upscale: bool,
     pub rife_available: bool,
     pub factor: u8,
@@ -33,6 +45,7 @@ pub enum Control {
     Mute,
     Upscale(bool),
     Interpolate(u8),
+    Rtx(crate::rtx::Effects),
 }
 
 impl Control {
@@ -41,10 +54,29 @@ impl Control {
         p: &mut Player,
         shader: &std::path::Path,
         rife: &mut crate::rife::Rife,
+        rtx: &mut crate::rtx::VideoProcessor,
+        surface: usize,
     ) -> Result<(), String> {
         match self {
-            Self::Interpolate(factor) => rife.set(p, factor),
+            Self::Rtx(settings) => rtx.set(p, settings, surface),
+            Self::Interpolate(factor) => {
+                let previous = rtx.requested;
+                rtx.clear(p)?;
+                let changed = rife.set(p, factor);
+                let restored = rtx.set(p, previous, surface);
+                changed.and(restored)
+            }
             Self::Upscale(true) => {
+                if rtx.requested.super_resolution {
+                    rtx.set(
+                        p,
+                        crate::rtx::Effects {
+                            super_resolution: false,
+                            hdr: rtx.requested.hdr,
+                        },
+                        surface,
+                    )?;
+                }
                 if !shader.is_file() {
                     return Err(
                         "The Anime4K shader is missing. Reinstall the application resources."
@@ -171,12 +203,20 @@ fn run(
 ) -> Result<(), String> {
     let mut player = Player::embedded(&runtime, surface)?;
     let mut rife = crate::rife::Rife::new(runtime.parent().ok_or("Missing application directory")?);
+    player.watch_video_processor()?;
+    let mut rtx = crate::rtx::VideoProcessor::default();
+    let mut display = rtx_player::display::for_window(surface).ok();
+    let mut display_check = Instant::now();
     let available = rife.available();
     let mut last = Instant::now();
     let mut error = None;
+    let mut hdr10_swapchain = None;
     loop {
         match rx.recv_timeout(Duration::from_millis(25)) {
             Ok(Request::Open(path)) => {
+                if rtx.requested.any() {
+                    rtx.clear(&mut player)?;
+                }
                 if rife.factor > 1 {
                     rife.set(&mut player, 1)?;
                 }
@@ -186,9 +226,9 @@ fn run(
                 }
             }
             Ok(Request::Control(command)) => {
-                if let Err(message) = command.apply(&mut player, &shader, &mut rife) {
-                    error = Some(message);
-                }
+                error = command
+                    .apply(&mut player, &shader, &mut rife, &mut rtx, surface)
+                    .err();
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => return Ok(()),
             Err(mpsc::RecvTimeoutError::Timeout) => {}
@@ -197,6 +237,20 @@ fn run(
             match player.event(0.0) {
                 Ok(PlaybackEvent::Idle) => break,
                 Ok(PlaybackEvent::Shutdown) => return Ok(()),
+                Ok(PlaybackEvent::SwapChain { hdr10 }) => hdr10_swapchain = Some(hdr10),
+                Ok(PlaybackEvent::SuperResolution) => {
+                    rtx.accepted.super_resolution = rtx.requested.super_resolution
+                }
+                Ok(PlaybackEvent::VideoHdr) => rtx.accepted.hdr = rtx.requested.hdr,
+                Ok(PlaybackEvent::ExtensionFailed) => {
+                    if rtx.requested.any() {
+                        let restore = rtx.clear(&mut player);
+                        error = Some(restore.err().unwrap_or_else(|| {
+                            "The driver rejected RTX video processing. Original video restored."
+                                .into()
+                        }));
+                    }
+                }
                 Ok(_) => (),
                 Err(message) => {
                     error = Some(message);
@@ -205,6 +259,21 @@ fn run(
             }
         }
         if last.elapsed() >= Duration::from_millis(200) {
+            if display_check.elapsed() > Duration::from_secs(2) {
+                display = rtx_player::display::for_window(surface).ok();
+                display_check = Instant::now();
+                if rtx.requested.hdr && !display.as_ref().is_some_and(|s| s.hdr_active) {
+                    rtx.set(
+                        &mut player,
+                        crate::rtx::Effects {
+                            hdr: false,
+                            ..rtx.requested
+                        },
+                        surface,
+                    )?;
+                    error = Some("HDR output became unavailable. SDR playback restored.".into());
+                }
+            }
             let number = |key| {
                 player
                     .property(key)
@@ -218,6 +287,18 @@ fn run(
                 paused: player.property(c"pause").as_deref() == Some("yes"),
                 volume: number(c"volume").unwrap_or(100.0),
                 speed: number(c"speed").unwrap_or(1.0),
+                display_hdr: display.as_ref().map(|s| s.hdr_active),
+                display_bits: display.as_ref().map(|s| s.bits_per_channel),
+                hdr10_swapchain,
+                requested_rtx: rtx.requested,
+                active_rtx: rtx.accepted,
+                source_transfer: player.property(c"video-params/gamma"),
+                output_transfer: player.property(c"video-out-params/gamma"),
+                target_transfer: player.property(c"video-target-params/gamma"),
+                target_primaries: player.property(c"video-target-params/primaries"),
+                target_peak: number(c"video-target-params/max-luma"),
+                processed_width: number(c"video-out-params/w"),
+                processed_height: number(c"video-out-params/h"),
                 rife_available: available,
                 factor: rife.factor,
                 source_fps: number(c"container-fps"),

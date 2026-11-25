@@ -2,6 +2,7 @@
 mod desktop;
 mod engine;
 mod rife;
+mod rtx;
 fn main() -> tauri::Result<()> {
     // Set the optional script runtime before Tauri or the playback worker starts.
     let provider = std::env::current_exe()?

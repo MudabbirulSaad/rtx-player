@@ -3091,6 +3091,7 @@ name = "rtx-player"
 version = "0.1.0"
 dependencies = [
  "libloading 0.8.9",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

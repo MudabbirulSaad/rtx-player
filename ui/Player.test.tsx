@@ -6,7 +6,9 @@ import { Player } from './Player'
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }))
 const loaded = { title: 'Pattern', position: 2, duration: 16, paused: false,
-  volume: 90, speed: 1, decoder: 'd3d11va', error: null }
+  volume: 90, speed: 1, decoder: 'd3d11va', error: null, display_hdr: false,
+  source_transfer: 'bt.1886', requested_rtx: {super_resolution:false, hdr:false},
+  active_rtx: {super_resolution:false, hdr:false} }
 
 describe('playback controls', () => {
   beforeEach(() => { vi.mocked(invoke).mockImplementation(async name => name === 'playback_state' ? loaded : undefined) })
@@ -17,6 +19,21 @@ describe('playback controls', () => {
     await screen.findByText('Pattern')
     fireEvent.change(screen.getByRole('slider', { name: 'Seek' }), { target: { value: '8' } })
     await waitFor(() => expect(invoke).toHaveBeenCalledWith('transport', { command: { kind: 'seek', value: 8 } }))
+  })
+
+  it('requests RTX scaling independently and gates HDR on the current output', async () => {
+    render(<Player />)
+    await screen.findByText('Pattern')
+    expect((screen.getByRole('button', {name: 'RTX HDR'}) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(screen.getByRole('button', {name: 'RTX Super Resolution'}))
+    expect(invoke).toHaveBeenCalledWith('transport', {command: {kind: 'rtx', value: {super_resolution: true, hdr: false}}})
+  })
+
+  it('keeps the driver indicator off until the request is accepted', async () => {
+    vi.mocked(invoke).mockResolvedValue({...loaded, requested_rtx: {super_resolution:true,hdr:false}})
+    render(<Player />)
+    await screen.findByText('Pattern')
+    expect(screen.getByRole('button', {name:'RTX Super Resolution'}).getAttribute('aria-pressed')).toBe('false')
   })
 
   it('keeps transport disabled when initialization fails and shows the engine error', async () => {

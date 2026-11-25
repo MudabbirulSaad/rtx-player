@@ -3,13 +3,18 @@ import { invoke } from '@tauri-apps/api/core'
 import { Activity, FolderOpen, Maximize, Pause, Play, Volume2 } from 'lucide-react'
 import './player.css'
 
+type Effects = { super_resolution: boolean; hdr: boolean }
 type Playback = {
   title: string | null; position: number | null; duration: number | null
   source_fps: number | null; avsync: number | null; dropped: number | null
   rife_available: boolean; factor: number; filtered_fps: number | null
+  requested_rtx: Effects; active_rtx: Effects; display_hdr: boolean | null; display_bits: number | null; hdr10_swapchain: boolean | null
+  processed_width: number | null; processed_height: number | null
+  source_transfer: string | null; output_transfer: string | null
+  target_transfer: string | null; target_primaries: string | null; target_peak: number | null
   upscale: boolean; paused: boolean; volume: number; speed: number; decoder: string | null; error: string | null
 }
-type Command = { kind: 'upscale'; value: boolean } | { kind: 'toggle' | 'mute' } | { kind: 'volume' | 'seek' | 'speed' | 'interpolate'; value: number }
+type Command = { kind: 'rtx'; value: Effects } | { kind: 'upscale'; value: boolean } | { kind: 'toggle' | 'mute' } | { kind: 'volume' | 'seek' | 'speed' | 'interpolate'; value: number }
 
 function clock(seconds: number) {
   const t = Math.floor(Math.max(0, seconds))
@@ -63,8 +68,19 @@ export function Player() {
   }, [scrub, transport])
 
   const playing = Boolean(state?.title)
+  const effects = state?.requested_rtx ?? {super_resolution:false, hdr:false}
+  const active = state?.active_rtx
+  const sdrSource = ['bt.1886','srgb','gamma2.2','gamma2.4'].includes(state?.source_transfer ?? '')
+  const hdrHint = !state?.display_hdr ? 'Enable Windows HDR on this display to convert SDR video.' :
+    !sdrSource ? 'Conversion requires an SDR source.' : 'Convert SDR video to HDR using the NVIDIA driver.'
   const duration = state?.duration ?? 0
   const at = scrub ?? state?.position ?? 0
+  const output = state && [
+    `Filter ${state.processed_width ?? '—'}×${state.processed_height ?? '—'} ${state.output_transfer ?? '—'}`,
+    `Target ${state.target_transfer ?? '—'} ${state.target_primaries ?? '—'}` + (state.target_peak == null ? '' : ` ${Math.round(state.target_peak)} nits`),
+    `Windows ${state.display_hdr == null ? 'unknown' : state.display_hdr ? 'HDR' : 'SDR'}` + (state.display_bits ? ` ${state.display_bits}-bit` : ''),
+    ...(state.hdr10_swapchain ? ['HDR10 swap chain'] : []),
+  ].join(' · ')
   return <section className="shell flex flex-col justify-center gap-2 px-5" aria-label="Playback controls">
     <div className="flex items-center justify-between gap-3">
       {stats && state ? <span className="metrics truncate" aria-label="Playback statistics">
@@ -81,10 +97,6 @@ export function Player() {
         aria-label={state?.paused ? 'Play' : 'Pause'} onClick={() => void transport({kind:'toggle'})}>
         {state?.paused || !playing ? <Play/> : <Pause/>}</button>
       <button onClick={() => void request('open_media')} title="Open file (Ctrl+O)"><FolderOpen/>Open</button>
-      <button aria-pressed={Boolean(state?.upscale)} disabled={!playing} title="Anime4K neural upscaling for enlarged video" onClick={() => void transport({kind: 'upscale', value: !state?.upscale})}>Anime4K</button>
-      <select aria-label="Frame interpolation" disabled={!playing || !state?.rife_available} title={state?.rife_available ? "RIFE frame interpolation" : "Install the optional RIFE provider to enable interpolation"} value={state?.factor || 1} onChange={e => void transport({kind:"interpolate", value:Number(e.target.value)})}>
-        <option value={1}>Original FPS</option>{[2,3,4,5,6].map(n => <option key={n} value={n}>RIFE {n}×</option>)}
-      </select>
       <span className="error truncate" role="status" title={issue || state?.error || undefined}>{issue || state?.error}</span>
       <div className="ml-auto flex items-center gap-2">
         <button aria-label="Playback statistics" aria-pressed={stats} onClick={() => setStats(!stats)}><Activity/></button>
@@ -99,6 +111,15 @@ export function Player() {
         </select>
         <button aria-label="Toggle fullscreen" title="Fullscreen" onClick={() => void request('fullscreen')}><Maximize/></button>
       </div>
+    </div>
+    <div className="enhancements flex items-center gap-2" role="group" aria-label="Video enhancements">
+      <button aria-pressed={Boolean(state?.upscale)} disabled={!playing} title="Anime4K neural upscaling for enlarged video" onClick={() => void transport({kind:'upscale',value:!state?.upscale})}>Anime4K</button>
+      <button aria-label="RTX Super Resolution" aria-pressed={Boolean(active?.super_resolution)} disabled={!playing} title="Apply 2× NVIDIA video super resolution" onClick={() => void transport({kind:'rtx',value:{...effects,super_resolution:!effects.super_resolution}})}>RTX VSR</button>
+      <button aria-pressed={Boolean(active?.hdr)} disabled={!playing || (!effects.hdr && (!sdrSource || !state?.display_hdr))} title={hdrHint} onClick={() => void transport({kind:'rtx',value:{...effects,hdr:!effects.hdr}})}>RTX HDR</button>
+      <select aria-label="Frame interpolation" disabled={!playing || !state?.rife_available || !sdrSource} title="RIFE interpolation requires the optional provider and SDR video" value={state?.factor || 1} onChange={e => void transport({kind:'interpolate',value:Number(e.target.value)})}>
+        <option value={1}>Original FPS</option>{[2,3,4,5,6].map(n => <option key={n} value={n}>RIFE {n}×</option>)}
+      </select>
+      {stats && output && <span className="metrics truncate" title={output}>{output}</span>}
     </div>
   </section>
 }
