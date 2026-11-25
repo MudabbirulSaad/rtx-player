@@ -84,15 +84,23 @@ pub struct Player {
 
 impl Player {
     pub fn open(runtime: &Path) -> Result<Self, String> {
-        Self::create(runtime, None)
+        Self::create(runtime, None, None)
     }
 
     /// Attach to a live, application-owned child HWND on Windows.
     pub fn embedded(runtime: &Path, window: usize) -> Result<Self, String> {
-        Self::create(runtime, Some(window))
+        Self::create(runtime, Some(window), None)
     }
 
-    fn create(runtime: &Path, window: Option<usize>) -> Result<Self, String> {
+    pub(crate) fn offline(runtime: &Path, options: &[(&CStr, &str)]) -> Result<Self, String> {
+        Self::create(runtime, None, Some(options))
+    }
+
+    fn create(
+        runtime: &Path,
+        window: Option<usize>,
+        offline: Option<&[(&CStr, &str)]>,
+    ) -> Result<Self, String> {
         let api = Api::load(runtime)?;
         // The owned handle is destroyed before unloading the library, including on init failure.
         let handle =
@@ -102,17 +110,32 @@ impl Player {
             (c"config", c"no"),
             (c"load-scripts", c"no"),
             (c"ytdl", c"no"),
-            (c"vo", c"gpu-next"),
-            (c"gpu-api", c"d3d11"),
-            (c"hwdec", c"auto-safe"),
-            (c"input-default-bindings", c"yes"),
-            (c"input-vo-keyboard", c"yes"),
-            (c"title", c"RTX Player"),
         ] {
             // The handle is live and mpv copies each option before returning.
             let code =
                 unsafe { (player.api.option)(handle.as_ptr(), key.as_ptr(), value.as_ptr()) };
             player.api.check(code, key.to_string_lossy().as_ref())?;
+        }
+        if let Some(options) = offline {
+            for &(key, value) in options {
+                let value = CString::new(value).map_err(|_| "Invalid encoder setting")?;
+                let result =
+                    unsafe { (player.api.option)(handle.as_ptr(), key.as_ptr(), value.as_ptr()) };
+                player.api.check(result, key.to_string_lossy().as_ref())?;
+            }
+        } else {
+            for (key, value) in [
+                (c"vo", c"gpu-next"),
+                (c"gpu-api", c"d3d11"),
+                (c"hwdec", c"auto-safe"),
+                (c"input-default-bindings", c"yes"),
+                (c"input-vo-keyboard", c"yes"),
+                (c"title", c"RTX Player"),
+            ] {
+                let result =
+                    unsafe { (player.api.option)(handle.as_ptr(), key.as_ptr(), value.as_ptr()) };
+                player.api.check(result, key.to_string_lossy().as_ref())?;
+            }
         }
         if let Some(window) = window {
             let wid = CString::new(window.to_string()).map_err(|e| e.to_string())?;
