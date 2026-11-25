@@ -1,0 +1,10 @@
+[package]
+name = "rtx-player"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.91"
+license = "GPL-3.0-or-later"
+publish = false
+
+[dependencies]
+libloading = "=0.8.9"

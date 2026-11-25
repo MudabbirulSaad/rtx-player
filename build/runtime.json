@@ -1,0 +1,8 @@
+{
+  "source": "https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/20261111/mpv-dev-x86_64-20261111-git-bcde6b93cc.7z",
+  "archive_bytes": 31776374,
+  "archive_sha256": "273c079b11ea5575822f972756f4c9a71149a5c10130353abeb8586738938452",
+  "member": "libmpv-2.dll",
+  "member_bytes": 121789952,
+  "member_sha256": "88504ee5560942a955405e99dfb5971368e4cf851321f36565bf2a667271db1b"
+}

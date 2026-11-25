@@ -1,0 +1,12 @@
+/target/
+/dist/
+/vendor/
+/node_modules/
+/.artifacts/
+*.mp4
+*.mkv
+*.onnx
+*.engine
+*.dmp
+*.log
+__pycache__/
