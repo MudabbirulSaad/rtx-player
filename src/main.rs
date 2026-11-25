@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-mod playback;
+use rtx_player::playback;
 
 fn media_argument(args: impl IntoIterator<Item = PathBuf>) -> Result<PathBuf, String> {
     let mut args = args.into_iter();

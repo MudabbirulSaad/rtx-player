@@ -1,0 +1,13 @@
+{
+  "productName": "RTX Player",
+  "version": "0.1.0",
+  "identifier": "io.github.mudabbirulsaad.rtxplayer",
+  "build": { "frontendDist": "../dist" },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src ipc: http://ipc.localhost; object-src 'none'; frame-src 'none'; base-uri 'none'"
+    }
+  },
+  "bundle": { "active": false }
+}

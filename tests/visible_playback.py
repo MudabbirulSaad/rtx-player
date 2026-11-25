@@ -6,6 +6,8 @@ from pathlib import Path
 import subprocess
 import time
 
+from window_process import close_player
+
 
 def sample_window(pid):
     user = ct.WinDLL("user32", use_last_error=True)
@@ -74,7 +76,7 @@ def verify(exe, clip):
                 time.sleep(0.3)
             raise RuntimeError("Expected a visible, unobscured, moving color pattern")
         finally:
-            player.terminate()
+            close_player(player)
 
 
 if __name__ == "__main__":

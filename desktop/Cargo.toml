@@ -1,0 +1,17 @@
+[package]
+name = "rtx-player-desktop"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.91"
+license = "GPL-3.0-or-later"
+publish = false
+
+[dependencies]
+rtx-player = { path = ".." }
+tauri = { version = "=2.12.7", features = ["unstable"] }
+serde = { version = "1", features = ["derive"] }
+rfd = "0.15"
+windows-sys = { version = "0.61", features = ["Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_System_LibraryLoader"] }
+
+[build-dependencies]
+tauri-build = "2"

@@ -1,0 +1,18 @@
+@import "tailwindcss";
+:root { color-scheme: dark; font: 14px "Segoe UI Variable Text", "Segoe UI", sans-serif; color: #eff3f5; background: #141719; }
+body { margin: 0; }
+.shell { height: 100vh; border-top: 1px solid #303639; }
+.title { font-weight: 600; }
+.time { color: #d2d8dc; font-variant-numeric: tabular-nums; font-size: 12px; }
+.time span { color: #747c81; }
+button, select { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-width: 32px; height: 32px; border-radius: 6px; padding: 0 8px; cursor: pointer; }
+button:hover, select:hover { background: #2c3134; }
+button.primary { background: #b0edcd; color: #10251d; }
+button svg { width: 17px; height: 17px; }
+button:disabled, input:disabled, select:disabled { opacity: .45; cursor: default; }
+:focus-visible { outline: 2px solid #a1ddc0; outline-offset: 2px; }
+input { accent-color: #a1ddc0; }
+.timeline { display: block; width: 100%; height: 12px; }
+.volume { width: 70px; }
+select { background: #202528; font-variant-numeric: tabular-nums; }
+.error { color: #f5b7a7; font-size: 12px; }

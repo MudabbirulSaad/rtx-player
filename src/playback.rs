@@ -25,6 +25,8 @@ struct Api {
     initialize: unsafe extern "C" fn(Handle) -> c_int,
     option: unsafe extern "C" fn(Handle, *const c_char, *const c_char) -> c_int,
     command: unsafe extern "C" fn(Handle, *const *const c_char) -> c_int,
+    get: unsafe extern "C" fn(Handle, *const c_char) -> *mut c_char,
+    free: unsafe extern "C" fn(*mut c_void),
     wait: unsafe extern "C" fn(Handle, f64) -> *const Event,
     error: unsafe extern "C" fn(c_int) -> *const c_char,
     destroy: unsafe extern "C" fn(Handle),
@@ -54,6 +56,8 @@ impl Api {
                 initialize: symbol!("mpv_initialize"),
                 option: symbol!("mpv_set_option_string"),
                 command: symbol!("mpv_command"),
+                get: symbol!("mpv_get_property_string"),
+                free: symbol!("mpv_free"),
                 wait: symbol!("mpv_wait_event"),
                 error: symbol!("mpv_error_string"),
                 destroy: symbol!("mpv_terminate_destroy"),
@@ -80,6 +84,15 @@ pub struct Player {
 
 impl Player {
     pub fn open(runtime: &Path) -> Result<Self, String> {
+        Self::create(runtime, None)
+    }
+
+    /// Attach to a live, application-owned child HWND on Windows.
+    pub fn embedded(runtime: &Path, window: usize) -> Result<Self, String> {
+        Self::create(runtime, Some(window))
+    }
+
+    fn create(runtime: &Path, window: Option<usize>) -> Result<Self, String> {
         let api = Api::load(runtime)?;
         // The owned handle is destroyed before unloading the library, including on init failure.
         let handle =
@@ -101,6 +114,20 @@ impl Player {
                 unsafe { (player.api.option)(handle.as_ptr(), key.as_ptr(), value.as_ptr()) };
             player.api.check(code, key.to_string_lossy().as_ref())?;
         }
+        if let Some(window) = window {
+            let wid = CString::new(window.to_string()).map_err(|e| e.to_string())?;
+            for (key, value) in [
+                (c"wid", wid.as_c_str()),
+                (c"idle", c"yes"),
+                (c"keep-open", c"yes"),
+                (c"osc", c"no"),
+                (c"input-default-bindings", c"no"),
+            ] {
+                let result =
+                    unsafe { (player.api.option)(handle.as_ptr(), key.as_ptr(), value.as_ptr()) };
+                player.api.check(result, "Configure embedded surface")?;
+            }
+        }
         player.api.check(
             unsafe { (player.api.initialize)(handle.as_ptr()) },
             "Initialize playback",
@@ -108,42 +135,93 @@ impl Player {
         Ok(player)
     }
 
-    pub fn play(&mut self, path: &Path) -> Result<(), String> {
-        let path = CString::new(path.to_str().ok_or("Unsupported file name encoding.")?)
-            .map_err(|_| "Invalid file name")?;
-        let args = [c"loadfile".as_ptr(), path.as_ptr(), ptr::null()];
-        // All arguments stay live for the synchronous command. Events stay valid until the next wait.
+    pub fn load(&mut self, path: &Path) -> Result<(), String> {
+        self.command(&[
+            "loadfile",
+            path.to_str().ok_or("Unsupported filename encoding")?,
+        ])
+    }
+
+    pub fn command(&mut self, args: &[&str]) -> Result<(), String> {
+        let strings = args
+            .iter()
+            .map(|arg| CString::new(*arg))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| "Invalid command argument")?;
+        let pointers: Vec<_> = strings
+            .iter()
+            .map(|s| s.as_ptr())
+            .chain([ptr::null()])
+            .collect();
+        // mpv copies these strings during the synchronous call.
+        self.api.check(
+            unsafe { (self.api.command)(self.handle.as_ptr(), pointers.as_ptr()) },
+            args.first().copied().unwrap_or("Media command"),
+        )
+    }
+
+    pub fn property(&self, name: &CStr) -> Option<String> {
+        // Client API returns an allocated string or NULL for an unavailable property.
         unsafe {
-            self.api.check(
-                (self.api.command)(self.handle.as_ptr(), args.as_ptr()),
-                "Open media",
-            )?;
-            loop {
-                let event = (self.api.wait)(self.handle.as_ptr(), -1.0)
-                    .as_ref()
-                    .ok_or("The media engine returned an empty event.")?;
-                match event.id {
-                    1 => return Ok(()), // MPV_EVENT_SHUTDOWN
-                    7 => {
-                        let end = event
-                            .data
-                            .cast::<EndFile>()
-                            .as_ref()
-                            .ok_or("Missing end-file information.")?;
-                        if end.reason == 4 {
-                            return self.api.check(end.error, "Media playback failed");
-                        }
-                        if end.reason != 5 {
-                            return Ok(());
-                        } // Continue through playlist redirects.
+            let value = NonNull::new((self.api.get)(self.handle.as_ptr(), name.as_ptr()))?;
+            let text = CStr::from_ptr(value.as_ptr())
+                .to_string_lossy()
+                .into_owned();
+            (self.api.free)(value.as_ptr().cast());
+            Some(text)
+        }
+    }
+
+    pub fn event(&mut self, timeout: f64) -> Result<PlaybackEvent, String> {
+        // mpv owns both event records until the next wait on this handle.
+        unsafe {
+            let event = (self.api.wait)(self.handle.as_ptr(), timeout)
+                .as_ref()
+                .ok_or("Missing playback event")?;
+            match event.id {
+                0 => Ok(PlaybackEvent::Idle),
+                1 => Ok(PlaybackEvent::Shutdown),
+                8 => Ok(PlaybackEvent::Loaded),
+                7 => {
+                    let end = event
+                        .data
+                        .cast::<EndFile>()
+                        .as_ref()
+                        .ok_or("Missing end-file information")?;
+                    if end.reason == 4 {
+                        self.api.check(end.error, "Media playback failed")?;
                     }
-                    _ => {}
+                    Ok(if end.reason == 5 {
+                        PlaybackEvent::Other
+                    } else {
+                        PlaybackEvent::Ended
+                    })
                 }
+                _ => Ok(PlaybackEvent::Other),
+            }
+        }
+    }
+
+    pub fn play(&mut self, path: &Path) -> Result<(), String> {
+        self.load(path)?;
+        loop {
+            if matches!(
+                self.event(-1.0)?,
+                PlaybackEvent::Ended | PlaybackEvent::Shutdown
+            ) {
+                return Ok(());
             }
         }
     }
 }
 
+pub enum PlaybackEvent {
+    Idle,
+    Loaded,
+    Ended,
+    Shutdown,
+    Other,
+}
 impl Drop for Player {
     fn drop(&mut self) {
         // No other owner can access this handle and the library is still loaded.

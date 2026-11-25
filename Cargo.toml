@@ -8,3 +8,7 @@ publish = false
 
 [dependencies]
 libloading = "=0.8.9"
+
+[workspace]
+members = ["desktop"]
+resolver = "3"

@@ -10,3 +10,4 @@
 *.dmp
 *.log
 __pycache__/
+/desktop/gen/

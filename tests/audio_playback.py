@@ -4,6 +4,8 @@ from pathlib import Path
 import subprocess
 import time
 
+from window_process import close_player
+
 from pycaw.pycaw import AudioUtilities, IAudioMeterInformation
 
 
@@ -22,7 +24,7 @@ def verify(executable, fixture):
                 time.sleep(0.1)
             raise RuntimeError("Expected non-silent audio from the fixture")
         finally:
-            player.terminate()
+            close_player(player)
 
 
 if __name__ == "__main__":
