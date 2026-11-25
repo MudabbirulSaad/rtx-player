@@ -84,6 +84,10 @@ pub fn run() -> tauri::Result<()> {
             app.manage(Engine::start(
                 runtime,
                 surface,
+                app.path().resolve(
+                    "shaders/Anime4K/upscale-x2-s.glsl",
+                    tauri::path::BaseDirectory::Resource,
+                )?,
                 std::env::args_os().nth(1).map(PathBuf::from),
             )?);
             let host = window.clone();

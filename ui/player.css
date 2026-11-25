@@ -16,3 +16,4 @@ input { accent-color: #a1ddc0; }
 .volume { width: 70px; }
 select { background: #202528; font-variant-numeric: tabular-nums; }
 .error { color: #f5b7a7; font-size: 12px; }
+button[aria-pressed="true"] { color: #b0edcd; background: #253b30; }

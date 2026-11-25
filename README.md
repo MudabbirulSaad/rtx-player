@@ -1,6 +1,6 @@
 # RTX Player
 
-RTX Player opens local video in a native Direct3D 11 surface on Windows x64. A separate WebView hosts the playback controls. The desktop app supports opening a file, pause, seeking, volume, mute, playback speed and fullscreen. The command-line player uses the same libmpv runtime. Neither requires an AI runtime.
+RTX Player opens local video in a native Direct3D 11 surface on Windows x64. A separate WebView hosts the playback controls. The desktop app supports opening a file, pause, seeking, volume, mute, playback speed and fullscreen. For enlarged animation, the Anime4K button applies a small 2× convolutional upscaler. The shader runs when the output exceeds 1.2 times the source in both dimensions. The command-line player uses the same libmpv runtime. Neither requires an AI runtime.
 
 ## Build the desktop app
 

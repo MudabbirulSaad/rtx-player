@@ -5,9 +5,9 @@ import './player.css'
 
 type Playback = {
   title: string | null; position: number | null; duration: number | null
-  paused: boolean; volume: number; speed: number; decoder: string | null; error: string | null
+  upscale: boolean; paused: boolean; volume: number; speed: number; decoder: string | null; error: string | null
 }
-type Command = { kind: 'toggle' | 'mute' } | { kind: 'volume' | 'seek' | 'speed'; value: number }
+type Command = { kind: 'upscale'; value: boolean } | { kind: 'toggle' | 'mute' } | { kind: 'volume' | 'seek' | 'speed'; value: number }
 
 function clock(seconds: number) {
   const t = Math.floor(Math.max(0, seconds))
@@ -75,6 +75,7 @@ export function Player() {
         aria-label={state?.paused ? 'Play' : 'Pause'} onClick={() => void transport({kind:'toggle'})}>
         {state?.paused || !playing ? <Play/> : <Pause/>}</button>
       <button onClick={() => void request('open_media')} title="Open file (Ctrl+O)"><FolderOpen/>Open</button>
+      <button aria-pressed={Boolean(state?.upscale)} disabled={!playing} title="Anime4K neural upscaling for enlarged video" onClick={() => void transport({kind: 'upscale', value: !state?.upscale})}>Anime4K</button>
       <span className="error truncate" role="status" title={issue || state?.error || undefined}>{issue || state?.error}</span>
       <div className="ml-auto flex items-center gap-2">
         <button aria-label="Toggle mute" disabled={!playing} onClick={() => void transport({kind:'mute'})}><Volume2/></button>

@@ -12,6 +12,7 @@ pub struct Snapshot {
     pub paused: bool,
     pub volume: f64,
     pub speed: f64,
+    pub upscale: bool,
     pub decoder: Option<String>,
     pub error: Option<String>,
 }
@@ -24,11 +25,27 @@ pub enum Control {
     Volume(f64),
     Speed(f64),
     Mute,
+    Upscale(bool),
 }
 
 impl Control {
-    fn apply(self, p: &mut Player) -> Result<(), String> {
+    fn apply(self, p: &mut Player, shader: &std::path::Path) -> Result<(), String> {
         match self {
+            Self::Upscale(true) => {
+                if !shader.is_file() {
+                    return Err(
+                        "The Anime4K shader is missing. Reinstall the application resources."
+                            .into(),
+                    );
+                }
+                p.command(&[
+                    "change-list",
+                    "glsl-shaders",
+                    "set",
+                    shader.to_str().ok_or("Unsupported shader path")?,
+                ])
+            }
+            Self::Upscale(false) => p.command(&["change-list", "glsl-shaders", "clr", ""]),
             Self::Toggle => p.command(&["cycle", "pause"]),
             Self::Mute => p.command(&["cycle", "mute"]),
             Self::Seek(n) if n.is_finite() && n >= 0.0 => {
@@ -64,6 +81,7 @@ impl Engine {
     pub fn start(
         runtime: PathBuf,
         surface: usize,
+        shader: PathBuf,
         initial: Option<PathBuf>,
     ) -> Result<Self, String> {
         let (tx, rx) = mpsc::sync_channel(16);
@@ -72,7 +90,7 @@ impl Engine {
         let thread = std::thread::Builder::new()
             .name("playback".into())
             .spawn(move || {
-                let result = run(runtime, surface, rx, &shared);
+                let result = run(runtime, surface, shader, rx, &shared);
                 if let Err(error) = result
                     && let Ok(mut s) = shared.lock()
                 {
@@ -134,6 +152,7 @@ impl Engine {
 fn run(
     runtime: PathBuf,
     surface: usize,
+    shader: PathBuf,
     rx: mpsc::Receiver<Request>,
     shared: &Mutex<Snapshot>,
 ) -> Result<(), String> {
@@ -149,7 +168,7 @@ fn run(
                 }
             }
             Ok(Request::Control(command)) => {
-                if let Err(message) = command.apply(&mut player) {
+                if let Err(message) = command.apply(&mut player, &shader) {
                     error = Some(message);
                 }
             }
@@ -181,6 +200,9 @@ fn run(
                 paused: player.property(c"pause").as_deref() == Some("yes"),
                 volume: number(c"volume").unwrap_or(100.0),
                 speed: number(c"speed").unwrap_or(1.0),
+                upscale: player
+                    .property(c"glsl-shaders")
+                    .is_some_and(|v| !v.is_empty()),
                 decoder: player.property(c"hwdec-current"),
                 error: error.clone(),
             };

@@ -9,5 +9,5 @@
       "csp": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src ipc: http://ipc.localhost; object-src 'none'; frame-src 'none'; base-uri 'none'"
     }
   },
-  "bundle": { "active": false }
+  "bundle": { "active": false, "resources": { "../assets/Anime4K/": "shaders/Anime4K/" } }
 }
