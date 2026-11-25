@@ -1,9 +1,10 @@
 # mpv supplies video_in and user_data when it creates a VapourSynth filter.
 from pathlib import Path
+from fractions import Fraction
 import vapoursynth as vs
 
-factor = int(user_data)
-if factor not in (2, 3, 4, 5, 6):
+factor = Fraction(user_data)
+if factor not in (2, Fraction(5, 2), 3, 4, 5, 6):
     raise ValueError("Unsupported RIFE multiplier")
 root = Path(__file__).resolve().parents[1] / "providers/rife"
 core = vs.core
@@ -20,5 +21,5 @@ def mark_cut(n, f):
     return out
 marked = core.std.ModifyFrame(rgb, clips=[rgb, stats], selector=mark_cut)
 out = core.rife.RIFE(marked, model_path=str(root / "models/rife-v4.25-lite_ensembleFalse"),
-                     factor_num=factor, factor_den=1, gpu_thread=2, sc=True)
+                     factor_num=factor.numerator, factor_den=factor.denominator, gpu_thread=2, sc=True)
 core.resize.Bicubic(out, format=video_in.format.id, matrix_s=matrix).set_output()

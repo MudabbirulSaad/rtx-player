@@ -28,7 +28,7 @@ pub struct Snapshot {
     pub active_rtx: crate::rtx::Effects,
     pub upscale: bool,
     pub rife_available: bool,
-    pub factor: u8,
+    pub factor: f64,
     pub source_fps: Option<f64>,
     pub avsync: Option<f64>,
     pub dropped: Option<f64>,
@@ -46,7 +46,7 @@ pub enum Control {
     Speed(f64),
     Mute,
     Upscale(bool),
-    Interpolate(u8),
+    Interpolate(f64),
     Rtx(crate::rtx::Effects),
 }
 
@@ -219,8 +219,8 @@ fn run(
                 if rtx.requested.any() {
                     rtx.clear(&mut player)?;
                 }
-                if rife.factor > 1 {
-                    rife.set(&mut player, 1)?;
+                if rife.factor > 1.0 {
+                    rife.set(&mut player, 1.0)?;
                 }
                 error = player.load(&path).err();
                 if error.is_none() {

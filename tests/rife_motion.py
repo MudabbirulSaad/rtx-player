@@ -48,6 +48,14 @@ def verify(script):
     cut, held = out.get_frame(14), out.get_frame(15)
     assert bytes(cut[0]) == bytes(held[0]), "Cut was interpolated"
     print(f"Object centers {a:.2f}, {mid:.2f}, {b:.2f}; mean difference from blending {delta:.2f}; cut held")
+    runpy.run_path(str(script), init_globals={"video_in": original, "user_data": "2.5"})
+    fractional = vs.get_output(0)[0]
+    assert fractional.fps == 60 and fractional.num_frames == 40
+    for i in range(6):
+        frame = fractional.get_frame(i)
+        assert Fraction(frame.props["_DurationNum"],frame.props["_DurationDen"]) == Fraction(1,60)
+        assert abs(center(frame) - (a + 1.6*i)) < 0.8
+    print("24 to 60 fps: six correctly timed motion samples")
 
 
 if __name__ == "__main__":

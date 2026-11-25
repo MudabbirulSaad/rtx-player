@@ -3,14 +3,14 @@ use std::path::{Path, PathBuf};
 
 pub struct Rife {
     directory: PathBuf,
-    pub factor: u8,
+    pub factor: f64,
 }
 
 impl Rife {
     pub fn new(directory: &Path) -> Self {
         Self {
             directory: directory.to_owned(),
-            factor: 1,
+            factor: 1.0,
         }
     }
 
@@ -26,11 +26,11 @@ impl Rife {
         .all(|name| self.directory.join(name).is_file())
     }
 
-    pub fn set(&mut self, player: &mut Player, factor: u8) -> Result<(), String> {
-        if !(1..=6).contains(&factor) {
-            return Err("Choose a multiplier from 1 to 6.".into());
+    pub fn set(&mut self, player: &mut Player, factor: f64) -> Result<(), String> {
+        if ![1.0, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0].contains(&factor) {
+            return Err("Choose a supported RIFE multiplier.".into());
         }
-        if factor > 1 {
+        if factor > 1.0 {
             if !self.available() {
                 return Err("The optional RIFE provider is missing.".into());
             }
@@ -43,11 +43,11 @@ impl Rife {
                 );
             }
         }
-        if self.factor > 1 {
+        if self.factor > 1.0 {
             player.command(&["vf", "remove", "@rife"])?;
-            self.factor = 1;
+            self.factor = 1.0;
         }
-        if factor == 1 {
+        if factor == 1.0 {
             return player.command(&["set", "hwdec", "auto-safe"]);
         }
         player.command(&["set", "hwdec", "auto-copy"])?;

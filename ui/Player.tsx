@@ -77,6 +77,13 @@ export function Player() {
     !sdrSource ? 'Conversion requires an SDR source.' : 'Convert SDR video to HDR using the NVIDIA driver.'
   const duration = state?.duration ?? 0
   const at = scrub ?? state?.position ?? 0
+  const timing = state && [
+    state.decoder || 'Decoder unavailable',
+    `Source ${state.source_fps?.toFixed(2) ?? '—'} fps`,
+    `Filter ${state.filtered_fps?.toFixed(2) ?? '—'} fps`,
+    `Drops ${state.dropped ?? '—'}`,
+    `A/V ${state.avsync == null ? '—' : Math.round(state.avsync*1000)} ms`,
+  ].join(' · ')
   const output = state && [
     `Filter ${state.processed_width ?? '—'}×${state.processed_height ?? '—'} ${state.output_transfer ?? '—'}`,
     `Target ${state.target_transfer ?? '—'} ${state.target_primaries ?? '—'}` + (state.target_peak == null ? '' : ` ${Math.round(state.target_peak)} nits`),
@@ -86,9 +93,7 @@ export function Player() {
   if (exporting) return <ExportPanel close={()=>setExporting(false)}/>
   return <section className="shell flex flex-col justify-center gap-2 px-5" aria-label="Playback controls">
     <div className="flex items-center justify-between gap-3">
-      {stats && state ? <span className="metrics truncate" aria-label="Playback statistics">
-        {state.decoder || 'Decoder unavailable'} · Source {state.source_fps?.toFixed(2) ?? '—'} fps · Filter {state.filtered_fps?.toFixed(2) ?? '—'} fps · Drops {state.dropped ?? '—'} · A/V {state.avsync == null ? '—' : Math.round(state.avsync * 1000)} ms
-      </span> :
+      {stats && timing ? <span className="metrics truncate" title={timing}>{timing}</span> :
       <span className="title truncate" title={state?.title ?? undefined}>{state?.title ?? 'Open a video'}</span>}
       <span className="time">{clock(at)} <span>/</span> {clock(duration)}</span>
     </div>
@@ -121,7 +126,7 @@ export function Player() {
       <button aria-label="RTX Super Resolution" aria-pressed={Boolean(active?.super_resolution)} disabled={!playing} title="Apply 2× NVIDIA video super resolution" onClick={() => void transport({kind:'rtx',value:{...effects,super_resolution:!effects.super_resolution}})}>RTX VSR</button>
       <button aria-pressed={Boolean(active?.hdr)} disabled={!playing || (!effects.hdr && (!sdrSource || !state?.display_hdr))} title={hdrHint} onClick={() => void transport({kind:'rtx',value:{...effects,hdr:!effects.hdr}})}>RTX HDR</button>
       <select aria-label="Frame interpolation" disabled={!playing || !state?.rife_available || !sdrSource} title="RIFE interpolation requires the optional provider and SDR video" value={state?.factor || 1} onChange={e => void transport({kind:'interpolate',value:Number(e.target.value)})}>
-        <option value={1}>Original FPS</option>{[2,3,4,5,6].map(n => <option key={n} value={n}>RIFE {n}×</option>)}
+        <option value={1}>Original FPS</option>{[2,2.5,3,4,5,6].map(n => <option key={n} value={n}>RIFE {n}×</option>)}
       </select>
       {stats && output && <span className="metrics truncate" title={output}>{output}</span>}
     </div>
