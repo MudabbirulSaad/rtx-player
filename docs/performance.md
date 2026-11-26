@@ -37,4 +37,16 @@ In a separate run, adaptive mode observed 63.4 drops/s and 1089 ms of A/V offset
 - Native HDR10, RTX SDR-to-HDR conversion and combined HDR, VSR and interpolation each produced moving color on the desktop. In the three-effect check the renderer reported a 2560 × 1440 PQ signal, a BT.2020/PQ 10-bit swap chain and a 1499-nit target. The Windows display link reported 8 bits per channel. Physical 10-bit output and native UHD presentation require separate verification.
 - No other GPU generation has been tested.
 
+## Decoder checks
+
+The player displayed moving color at 392 screen sample points on each generated clip below. The native video area was 942 × 530. Each original-rate sample reported D3D11VA, zero drops and 0 ms of A/V offset. These are short functional checks.
+
+| Input | Source rate | Original-rate filter output |
+| --- | ---: | ---: |
+| VP9, 1280 × 720 | 24 fps | 24.00 fps |
+| AV1, 1920 × 1080 | 30 fps | 30.00 fps |
+| HEVC, 3840 × 2160 | 60 fps | 60.00 fps |
+
+The AV1 input also produced a visible image with the NVIDIA filter processing at 3840 × 2160.
+
 Use `scripts/presentmon_summary.py` to analyze a PresentMon trace and `tests/visible_cadence.py` to repeat the short screen-content measurement with a test-owned window.

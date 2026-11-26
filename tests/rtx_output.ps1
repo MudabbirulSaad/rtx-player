@@ -1,7 +1,7 @@
 param(
     [Parameter(Mandatory)][string]$Player,
     [Parameter(Mandatory)][string]$Fixture,
-    [Parameter(Mandatory)][ValidateSet('VSR','HDR','VSR-HDR','NativeHDR')][string]$Mode,
+    [Parameter(Mandatory)][ValidateSet('Original','VSR','HDR','VSR-HDR','NativeHDR')][string]$Mode,
     [Parameter(Mandatory)][int]$Width,
     [Parameter(Mandatory)][int]$Height,
     [switch]$CheckRendererOnly,
@@ -78,6 +78,10 @@ try {
     }
     & python "$PSScriptRoot/visible_playback.py" --pid $app.Id
     if ($LASTEXITCODE) { throw 'Visible playback check failed' }
+    if ($Mode -eq 'Original') {
+        $root.FindAll([Windows.Automation.TreeScope]::Descendants,[Windows.Automation.Condition]::TrueCondition) |
+            ForEach-Object { $_.Current.Name } | Where-Object { $_ -match ' · Source .* · Filter ' } | Select-Object -First 1
+    }
 } finally {
     if (!$app.HasExited) {
         if ($window) { [void][RtxTest.NativeWindow]::PostMessage($window, 0x10, [IntPtr]::Zero, [IntPtr]::Zero) }
