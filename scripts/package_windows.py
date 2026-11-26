@@ -70,7 +70,7 @@ def build(output):
         scratch=Path(temp)
         payload=scratch/"payload"
         payload.mkdir()
-        files={"rtx-player-desktop.exe":binary,"libmpv-2.dll":runtime,"tools/ffmpeg.exe":encoder,
+        files={"rtx-player-desktop.exe":binary,"libmpv-2.dll":runtime,"tools/export/ffmpeg.exe":encoder,
                "LICENSE":ROOT/"LICENSE","THIRD_PARTY_NOTICES.md":ROOT/"THIRD_PARTY_NOTICES.md",
                "README.md":ROOT/"README.md","docs/performance.md":ROOT/"docs/performance.md",
                "WebView2Loader.dll":binary.with_name("WebView2Loader.dll")}

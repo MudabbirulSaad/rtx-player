@@ -1,8 +1,8 @@
 {
-  "source": "https://files.pythonhosted.org/packages/82/0c/a1d49f3dd2688bd750b4986f8e271ad11f8e729a896070ea25f587b44da8/imageio_ffmpeg-0.8.1-py3-none-win_amd64.whl",
-  "archive_bytes": 38893483,
-  "archive_sha256": "f27ca4cb85e2d4946deedbce1a81245dfd942a2bcf94b53676fb3956aa95bf1b",
-  "member": "imageio_ffmpeg/binaries/ffmpeg-win-x86_64-v9.0.2.exe",
-  "member_bytes": 105423872,
-  "member_sha256": "3256173f3f8bffd7df12227c68adf68025edb1832273a9530688a7bb1ed8edec"
+  "source": "https://github.com/GyanD/codexffmpeg/releases/download/9.1/ffmpeg-9.1-full_build.7z",
+  "archive_bytes": 75452955,
+  "archive_sha256": "1a86f2c8b51b4990ae9a0b0f8bd4f345f5c79389d293ac3fda128a58ec507b16",
+  "member": "ffmpeg-9.1-full_build/bin/ffmpeg.exe",
+  "member_bytes": 231078400,
+  "member_sha256": "3ab4a9c404504ebff6662d6a48661db952f88ee7fb7d5949a711cad7a763b2cf"
 }

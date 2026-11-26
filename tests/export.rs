@@ -19,13 +19,16 @@ fn transcode_and_cancel_real_media() {
         height: Some(540),
         quality: 22,
         denoise: true,
+        anime: false,
+        hdr: false,
+        bitrate_kbps: None,
     };
     let cancel = AtomicBool::new(false);
     let mut last = 0.;
     transcode(&runtime, &source, &dest, &profile, &cancel, |v| last = v).unwrap();
     assert_eq!(last, 1.);
     assert!(std::fs::metadata(&dest).unwrap().len() > 1024);
-    let ffmpeg = runtime.with_file_name("tools").join("ffmpeg.exe");
+    let ffmpeg = runtime.with_file_name("tools").join("export/ffmpeg.exe");
     assert_eq!(
         decoded_frames(&ffmpeg, &dest),
         decoded_frames(&ffmpeg, &source)
@@ -78,4 +81,37 @@ fn decoded_frames(ffmpeg: &Path, media: &Path) -> usize {
         .next_back()
         .filter(|count| *count > 0)
         .expect("decoded frame count")
+}
+
+#[test]
+#[ignore = "requires a Vulkan GPU, NVENC, Anime4K and a finite SDR test clip"]
+fn encode_neural_upscale_and_hdr_with_nvenc() {
+    let runtime = PathBuf::from(std::env::var_os("RTX_TEST_RUNTIME").unwrap());
+    let source = PathBuf::from(std::env::var_os("RTX_TEST_MEDIA").unwrap());
+    let folder = tempfile::tempdir().unwrap();
+    let dest = folder.path().join("enhanced.mp4");
+    let profile = Profile {
+        encoder: Encoder::Nvenc,
+        height: None,
+        quality: 23,
+        denoise: false,
+        anime: true,
+        hdr: true,
+        bitrate_kbps: None,
+    };
+    let codec = transcode(
+        &runtime,
+        &source,
+        &dest,
+        &profile,
+        &AtomicBool::new(false),
+        |_| {},
+    )
+    .unwrap();
+    assert_eq!(codec, "hevc_nvenc");
+    let ffmpeg = runtime.with_file_name("tools").join("export/ffmpeg.exe");
+    assert_eq!(
+        decoded_frames(&ffmpeg, &source),
+        decoded_frames(&ffmpeg, &dest)
+    );
 }

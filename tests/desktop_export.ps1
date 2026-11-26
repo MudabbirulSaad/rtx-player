@@ -1,4 +1,4 @@
-param([Parameter(Mandatory)][string]$Player,[Parameter(Mandatory)][string]$Fixture)
+param([Parameter(Mandatory)][string]$Player,[Parameter(Mandatory)][string]$Fixture,[switch]$Enhanced)
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -Namespace ExportTest -Name Native -MemberDefinition @'
@@ -32,6 +32,11 @@ try{
     $root=[Windows.Automation.AutomationElement]::FromHandle($hwnd)
     $export=Wait-Value {$b=Named $root 'Export';if($b -and $b.Current.IsEnabled){$b}} 'Export unavailable'
     Click $export
+    if($Enhanced) {
+        foreach($name in @('Anime4K upscaling','Convert SDR to HDR (BT.2020/PQ)')) {
+            (Wait-Value {Named $root $name} "Missing $name").GetCurrentPattern([Windows.Automation.TogglePattern]::Pattern).Toggle()
+        }
+    }
     Click (Wait-Value {Named $root 'Save as…'} 'Export panel did not open')
     $desktop=[Windows.Automation.AutomationElement]::RootElement
     $owner=[Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ProcessIdProperty,$app.Id)

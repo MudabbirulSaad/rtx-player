@@ -40,7 +40,11 @@ An RTX toggle lights up when the driver accepts its extension. Playback statisti
 
 ## Local video export
 
-For a development build, install the pinned encoder with `python -m scripts.fetch_export target/debug/rtx-player-desktop.exe`. Open an SDR video and choose Export. Select CPU H.264 or NVIDIA NVENC, set an output height and quality, and optionally enable denoising. Lower quality numbers retain more detail. The encoder preserves video timestamps and chapters and transcodes audio to AAC. MKV copies subtitles and attachments. MP4 converts text subtitles to timed text. Use MKV for bitmap subtitles. The app checks the temporary file's duration, resolution and audio before saving it under a new name. Cancelling removes the incomplete file.
+For a development build, install the pinned encoder with `python -m scripts.fetch_export target/debug/rtx-player-desktop.exe`. Open an SDR video and choose Export. Select a CPU encoder, NVIDIA NVENC, or NVENC with CPU fallback. Set the output height and choose a quality value or a target bitrate. Lower quality numbers retain more detail. The saved status identifies the encoder used.
+
+Anime4K enlarges the image using the same shader as playback. Its default output is twice the source dimensions. SDR-to-HDR export uses libplacebo inverse tone mapping and encodes 10-bit HEVC with BT.2020 primaries and PQ transfer. This runs independently of the Windows display mode. SDR export uses H.264. Denoising can be combined with either output.
+
+The encoder preserves video timestamps and chapters and transcodes audio to AAC. MKV copies subtitles and attachments. MP4 converts text subtitles to timed text. Use MKV for bitmap subtitles. The app checks the temporary file's duration, resolution, audio and requested HDR signaling before saving it under a new name. Cancelling removes the incomplete file.
 
 ## Library and settings
 

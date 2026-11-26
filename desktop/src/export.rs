@@ -14,6 +14,7 @@ use tauri::State;
 pub enum Codec {
     Software,
     Nvenc,
+    Auto,
 }
 
 #[derive(Deserialize)]
@@ -22,6 +23,11 @@ pub struct Options {
     height: Option<u32>,
     quality: u8,
     denoise: bool,
+    #[serde(default)]
+    anime: bool,
+    #[serde(default)]
+    hdr: bool,
+    bitrate_kbps: Option<u32>,
 }
 
 #[derive(Clone, Default, Serialize)]
@@ -32,7 +38,9 @@ pub enum Status {
     Running {
         fraction: f64,
     },
-    Complete,
+    Complete {
+        encoder: String,
+    },
     Cancelled,
     Error {
         message: String,
@@ -72,10 +80,14 @@ impl Exports {
             encoder: match options.encoder {
                 Codec::Software => Encoder::Software,
                 Codec::Nvenc => Encoder::Nvenc,
+                Codec::Auto => Encoder::Auto,
             },
             height: options.height,
             quality: options.quality,
             denoise: options.denoise,
+            anime: options.anime,
+            hdr: options.hdr,
+            bitrate_kbps: options.bitrate_kbps,
         };
         let mut initial = self
             .status
@@ -91,7 +103,7 @@ impl Exports {
                 });
                 if let Ok(mut state) = status.lock() {
                     *state = match result {
-                        Ok(()) => Status::Complete,
+                        Ok(encoder) => Status::Complete { encoder },
                         Err(_) if flag.load(Ordering::Relaxed) => Status::Cancelled,
                         Err(message) => Status::Error { message },
                     };

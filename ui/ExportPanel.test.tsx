@@ -14,7 +14,7 @@ it('exports with the selected resolution and denoiser',async()=>{
   fireEvent.click(screen.getByLabelText('Denoise'))
   fireEvent.click(screen.getByText('Save as…'))
   await waitFor(()=>expect(invoke).toHaveBeenCalledWith('start_export',{options:{
-    encoder:'software',height:1080,quality:22,denoise:true,
+    encoder:'software',height:1080,quality:22,denoise:true,anime:false,hdr:false,bitrate_kbps:null,
   }}))
 })
 

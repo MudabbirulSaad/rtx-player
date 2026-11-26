@@ -26,26 +26,30 @@ def verified_copy(source, destination, size, digest):
 def install(executable):
     manifest = json.loads((Path(__file__).resolve().parents[1] / "build/runtime.json").read_text())
     destination = executable.resolve(strict=True).parent / "libmpv-2.dll"
+    return install_member(manifest, destination)
+
+
+def install_member(manifest, destination):
     if destination.exists():
         with destination.open("rb") as existing:
             if hashlib.file_digest(existing, "sha256").hexdigest() == manifest["member_sha256"]:
                 return destination
         raise FileExistsError(f"Another runtime already exists at {destination}")
     with tempfile.TemporaryDirectory(dir=destination.parent) as scratch:
-        archive = Path(scratch) / "runtime.7z"
-        dll = Path(scratch) / "runtime.dll"
+        archive = Path(scratch) / "download.7z"
+        member = Path(scratch) / "verified-member"
         with urllib.request.urlopen(manifest["source"], timeout=60) as response:
             verified_copy(response, archive, manifest["archive_bytes"], manifest["archive_sha256"])
         # Extract one member to stdout. Archive-controlled names never become file paths.
         tar = Path(os.environ["SystemRoot"]) / "System32/tar.exe"
         with subprocess.Popen([tar, "-xOf", archive, manifest["member"]], stdout=subprocess.PIPE) as proc:
             try:
-                verified_copy(proc.stdout, dll, manifest["member_bytes"], manifest["member_sha256"])
+                verified_copy(proc.stdout, member, manifest["member_bytes"], manifest["member_sha256"])
             finally:
                 proc.stdout.close()
             if proc.wait() != 0:
                 raise RuntimeError("Windows tar could not read the runtime archive")
-        dll.rename(destination)
+        member.rename(destination)
     return destination
 
 

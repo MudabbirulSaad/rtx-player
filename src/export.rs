@@ -1,4 +1,4 @@
-//! Local SDR transcodes. The encoder never receives the final output filename.
+//! Verified local video exports. The encoder never receives the final output filename.
 use crate::playback::{PlaybackEvent, Player};
 use std::io::{BufRead, BufReader, Read};
 use std::os::windows::process::CommandExt;
@@ -8,10 +8,11 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Encoder {
     Software,
     Nvenc,
+    Auto,
 }
 
 pub struct Profile {
@@ -19,12 +20,21 @@ pub struct Profile {
     pub height: Option<u32>,
     pub quality: u8,
     pub denoise: bool,
+    pub anime: bool,
+    pub hdr: bool,
+    pub bitrate_kbps: Option<u32>,
 }
 
 impl Profile {
     fn filter(&self) -> Result<String, String> {
         if self.quality > 51 {
             return Err("H.264 quality must be between 0 and 51.".into());
+        }
+        if self
+            .bitrate_kbps
+            .is_some_and(|n| !(128..=200_000).contains(&n))
+        {
+            return Err("Choose a bitrate between 128 and 200000 kb/s.".into());
         }
         let mut filters = Vec::new();
         if self.denoise {
@@ -34,18 +44,43 @@ impl Profile {
             if !(144..=4320).contains(&h) || h % 2 != 0 {
                 return Err("Output height must be even and between 144 and 4320.".into());
             }
-            filters.push(format!("scale=-2:{h}:flags=lanczos"));
+            if !self.anime && !self.hdr {
+                filters.push(format!("scale=-2:{h}:flags=lanczos"));
+            }
         }
-        filters.push("format=yuv420p".into());
+        if self.anime || self.hdr {
+            let height = self.height.map(|h| h.to_string()).unwrap_or_else(|| {
+                if self.anime {
+                    "ih*2".into()
+                } else {
+                    "ih".into()
+                }
+            });
+            let mut gpu = format!("libplacebo=w=2*round(oh*iw/ih/2):h={height}");
+            if self.anime {
+                gpu.push_str(":custom_shader_path=shaders/Anime4K/upscale-x2-s.glsl");
+            }
+            if self.hdr {
+                gpu.push_str(":format=yuv420p10le:colorspace=bt2020nc:color_primaries=bt2020:color_trc=smpte2084:range=tv:inverse_tonemapping=1");
+            } else {
+                gpu.push_str(":format=yuv420p");
+            }
+            filters.push(gpu);
+        } else {
+            filters.push("format=yuv420p".into());
+        }
         Ok(filters.join(","))
     }
 }
 
 struct Media {
     duration: f64,
+    width: u32,
     height: u32,
     audio: bool,
     gamma: String,
+    primaries: Option<String>,
+    pixel_format: Option<String>,
 }
 
 fn inspect(runtime: &Path, path: &Path, cancel: &AtomicBool) -> Result<Media, String> {
@@ -91,9 +126,15 @@ fn inspect(runtime: &Path, path: &Path, cancel: &AtomicBool) -> Result<Media, St
             .ok_or("Unknown video transfer function")?;
         return Ok(Media {
             duration,
+            width: probe
+                .property(c"video-params/w")
+                .and_then(|v| v.parse().ok())
+                .ok_or("Unknown source width")?,
             height,
             audio,
             gamma,
+            primaries: probe.property(c"video-params/primaries"),
+            pixel_format: probe.property(c"video-params/pixelformat"),
         });
     }
     Err("Could not inspect a finite local video stream.".into())
@@ -179,7 +220,7 @@ pub fn transcode(
     profile: &Profile,
     cancel: &AtomicBool,
     mut progress: impl FnMut(f64),
-) -> Result<(), String> {
+) -> Result<String, String> {
     check_cancel(cancel)?;
     let filter = profile.filter()?;
     if destination.try_exists().map_err(|e| e.to_string())? {
@@ -201,7 +242,20 @@ pub fn transcode(
         input.gamma.as_str(),
         "bt.1886" | "srgb" | "gamma2.2" | "gamma2.4"
     ) {
-        return Err("This H.264 profile requires an SDR source.".into());
+        return Err("These export profiles require an SDR source.".into());
+    }
+    let height = profile.height.unwrap_or(if profile.anime {
+        input.height.saturating_mul(2)
+    } else {
+        input.height
+    });
+    if height > 4320
+        || f64::from(height) * f64::from(input.width) / f64::from(input.height) > 8192.0
+    {
+        return Err("Choose an export resolution within 8192 × 4320.".into());
+    }
+    if profile.anime && f64::from(height) <= f64::from(input.height) * 1.2 {
+        return Err("Choose an output height above 1.2× the source for Anime4K.".into());
     }
     let parent = destination
         .parent()
@@ -213,79 +267,126 @@ pub fn transcode(
         .tempfile_in(parent)
         .map_err(|e| e.to_string())?
         .into_temp_path();
-    let encoder = runtime.with_file_name("tools").join("ffmpeg.exe");
-    let mut command = Command::new(encoder);
-    command
-        .args([
-            "-nostdin",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-xerror",
-            "-nostats",
-            "-progress",
-            "pipe:1",
-            "-protocol_whitelist",
-            "file",
-            "-i",
-        ])
-        .arg(&source)
-        .args([
-            "-map",
-            "0:V:0",
-            "-map",
-            "0:a?",
-            "-map",
-            "0:s?",
-            "-map_chapters",
-            "0",
-            "-map_metadata",
-            "0",
-            "-vf",
-            &filter,
-            "-fps_mode",
-            "passthrough",
-            "-c:a",
-            "aac",
-        ]);
-    if format == "matroska" {
-        command.args(["-c:s", "copy", "-map", "0:t?", "-c:t", "copy"]);
-    } else {
-        command.args(["-c:s", "mov_text"]);
-    }
-    let quality = profile.quality.to_string();
-    match profile.encoder {
-        Encoder::Software => command.args(["-c:v", "libx264", "-crf", &quality]),
-        Encoder::Nvenc => command.args([
-            "-c:v",
-            "h264_nvenc",
-            "-rc",
-            "vbr",
-            "-cq",
-            &quality,
-            "-b:v",
-            "0",
-        ]),
+    let application = runtime.parent().ok_or("Missing application directory")?;
+    let encoder = application.join("tools/export/ffmpeg.exe");
+    let command_for = |hardware: bool| {
+        let mut command = Command::new(&encoder);
+        command.current_dir(application);
+        command
+            .args([
+                "-nostdin",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-xerror",
+                "-nostats",
+                "-progress",
+                "pipe:1",
+                "-protocol_whitelist",
+                "file",
+                "-i",
+            ])
+            .arg(&source)
+            .args([
+                "-map",
+                "0:V:0",
+                "-map",
+                "0:a?",
+                "-map",
+                "0:s?",
+                "-map_chapters",
+                "0",
+                "-map_metadata",
+                "0",
+                "-vf",
+                &filter,
+                "-fps_mode",
+                "passthrough",
+                "-c:a",
+                "aac",
+            ]);
+        if format == "matroska" {
+            command.args(["-c:s", "copy", "-map", "0:t?", "-c:t", "copy"]);
+        } else {
+            command.args(["-c:s", "mov_text"]);
+        }
+        let codec = match (profile.hdr, hardware) {
+            (true, true) => "hevc_nvenc",
+            (true, false) => "libx265",
+            (false, true) => "h264_nvenc",
+            (false, false) => "libx264",
+        };
+        command.args(["-c:v", codec]);
+        if profile.hdr {
+            command.args([
+                "-profile:v",
+                "main10",
+                "-color_trc",
+                "smpte2084",
+                "-color_primaries",
+                "bt2020",
+                "-colorspace",
+                "bt2020nc",
+            ]);
+            if format == "mp4" {
+                command.args(["-tag:v", "hvc1"]);
+            }
+        }
+        if let Some(rate) = profile.bitrate_kbps {
+            command.args(["-b:v", &format!("{rate}k")]);
+        } else if hardware {
+            command.args([
+                "-rc",
+                "vbr",
+                "-cq",
+                &profile.quality.to_string(),
+                "-b:v",
+                "0",
+            ]);
+        } else {
+            command.args(["-crf", &profile.quality.to_string()]);
+        }
+        command
+            .args(["-f", format, "-y"])
+            .arg(temporary.as_os_str());
+        (command, codec)
     };
-    command
-        .args(["-f", format, "-y"])
-        .arg(temporary.as_os_str());
-    run_encoder(command, cancel, |micros| {
-        progress((micros as f64 / 1_000_000.0 / input.duration).clamp(0., 0.99))
-    })?;
+    let mut report =
+        |micros| progress((micros as f64 / 1_000_000.0 / input.duration).clamp(0., 0.99));
+    let (command, mut codec) = command_for(profile.encoder != Encoder::Software);
+    if let Err(e) = run_encoder(command, cancel, &mut report) {
+        let nvenc_error = e.contains("[h264_nvenc") || e.contains("[hevc_nvenc");
+        if profile.encoder != Encoder::Auto || !nvenc_error {
+            return Err(e);
+        }
+        check_cancel(cancel)?;
+        let (fallback, software) = command_for(false);
+        run_encoder(fallback, cancel, &mut report)?;
+        codec = software;
+    }
     let output = inspect(runtime, &temporary, cancel)?;
     if (output.duration - input.duration).abs() > 0.25
-        || output.height != profile.height.unwrap_or(input.height)
+        || output.height != height
         || (input.audio && !output.audio)
     {
         return Err("The encoded file failed duration, resolution or audio verification.".into());
+    }
+    if profile.hdr
+        && (output.gamma != "pq"
+            || output.primaries.as_deref() != Some("bt.2020")
+            || !output
+                .pixel_format
+                .as_deref()
+                .is_some_and(|v| v.contains("10")))
+    {
+        return Err("The encoded file failed 10-bit BT.2020/PQ verification.".into());
     }
     check_cancel(cancel)?;
     temporary
         .persist_noclobber(destination)
         .map_err(|e| e.error.to_string())?;
     progress(1.0);
-    Ok(())
+    Ok(codec.to_owned())
 }
 
 #[cfg(test)]
@@ -298,6 +399,9 @@ mod tests {
             height: Some(721),
             quality: 20,
             denoise: false,
+            anime: false,
+            hdr: false,
+            bitrate_kbps: None,
         };
         assert!(profile.filter().is_err());
         profile.height = Some(720);
@@ -315,6 +419,9 @@ mod tests {
             height: None,
             quality: 20,
             denoise: false,
+            anime: false,
+            hdr: false,
+            bitrate_kbps: None,
         };
         let result = transcode(
             Path::new("missing.dll"),
