@@ -5,6 +5,7 @@ import {Picture,type PictureOptions} from './Picture'
 
 export type ProcessingInput={height:number|null;automatic:boolean;fps24:boolean}
 type Props = {
+  preset:(name:string)=>void
   picture?:PictureOptions; changePicture:(options:PictureOptions)=>void
   input:ProcessingInput; changeInput:(input:ProcessingInput)=>void; sourceFps:number|null; displayFps:number|null
   close:()=>void; issue:(message:string)=>void
@@ -43,8 +44,13 @@ export function Enhancements(props:Props) {
   return <main className="library enhance" onKeyDown={e=>{if(e.key==='Escape')props.close()}}>
     <button ref={back} onClick={props.close}><ArrowLeft/>Back to player</button>
     <header><h1>Video enhancements</h1></header>
+    <fieldset disabled={!props.playing}><legend>Playback presets</legend>
+      {['Original','Auto','Performance','Balanced','Quality'].map(name=><button key={name} disabled={['Balanced','Quality'].includes(name)&&!props.interpolationAvailable} onClick={()=>props.preset(name.toLowerCase())}>{name}</button>)}
+      <button onClick={()=>document.getElementById('processing-input')?.focus()}>Custom</button>
+      <p>Original clears spatial and temporal effects. Auto adapts towards 60 fps. Performance uses Anime4K, Balanced uses adaptive 2× RIFE, and Quality combines Anime4K with a 60 fps target.</p>
+    </fieldset>
     <fieldset disabled={!props.playing}><legend>Processing input</legend>
-      <label>Resolution <select aria-label="Processing resolution" value={props.input.automatic?'auto':props.input.height??'source'}
+      <label>Resolution <select id="processing-input" aria-label="Processing resolution" value={props.input.automatic?'auto':props.input.height??'source'}
         onChange={e=>props.changeInput({...props.input,automatic:e.target.value==='auto',height:Number(e.target.value)||null})}>
         <option value="source">Source resolution</option><option value="auto">Automatic · up to 720p</option>
         {[480,720,1080,1440,2160].map(h=><option key={h} value={h}>{h}p</option>)}</select></label>

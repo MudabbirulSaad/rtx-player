@@ -14,6 +14,7 @@ impl Effects {
 }
 
 pub struct VideoProcessor {
+    pub comparison: Option<Spatial>,
     pub picture: crate::picture::Picture,
     pub software_decode: bool,
     pub input: crate::input::ProcessingInput,
@@ -25,6 +26,7 @@ pub struct VideoProcessor {
 impl Default for VideoProcessor {
     fn default() -> Self {
         Self {
+            comparison: None,
             picture: Default::default(),
             software_decode: false,
             input: Default::default(),
@@ -33,6 +35,12 @@ impl Default for VideoProcessor {
             scale: 2.0,
         }
     }
+}
+
+#[derive(Clone, Copy)]
+pub enum Spatial {
+    Anime,
+    Nvidia,
 }
 
 impl VideoProcessor {

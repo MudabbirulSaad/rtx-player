@@ -2,6 +2,7 @@
 
 - Play local video with native Direct3D output, hardware or software decoding, WASAPI audio, subtitles and chapters.
 - Add folders and playlists, generate local previews and optionally resume recent videos.
+- Preview seek positions, capture a rendered frame as PNG, compare spatial scaling and switch to an always-on-top compact player.
 - Use RIFE, Anime4K, NVIDIA spatial processing and HDR conversion on compatible hardware. Settings can install the optional interpolation runtime.
 - Export H.264 SDR or 10-bit HEVC PQ video with software encoding or NVENC. Interpolated export supports constant-rate sources with the optional reader.
 - Adjust color, deinterlacing, sharpening, aspect ratio and crop. Adaptive interpolation can step down after sustained playback pressure.

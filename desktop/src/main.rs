@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod adaptive;
+mod capture;
 mod desktop;
 mod diagnostics;
 mod engine;
@@ -8,6 +9,7 @@ mod gpu;
 mod input;
 mod library;
 mod picture;
+mod presets;
 mod rife;
 mod rtx;
 mod settings;

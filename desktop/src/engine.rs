@@ -11,6 +11,8 @@ pub struct Services {
 
 #[derive(Clone, Default, Serialize)]
 pub struct Snapshot {
+    pub comparing: bool,
+    pub compact: bool,
     pub renderer_adapter: Option<String>,
     pub recovered_library: bool,
     pub picture: crate::picture::Picture,
@@ -74,6 +76,8 @@ pub struct Snapshot {
 #[derive(Deserialize)]
 #[serde(tag = "kind", content = "value", rename_all = "camelCase")]
 pub enum Control {
+    Preset(crate::presets::Preset),
+    Compare(bool),
     Next,
     Previous,
     Adaptive(bool),
@@ -96,7 +100,7 @@ pub enum Control {
 }
 
 impl Control {
-    fn apply(
+    pub(super) fn apply(
         self,
         p: &mut Player,
         shader: &std::path::Path,
@@ -104,7 +108,58 @@ impl Control {
         rtx: &mut crate::rtx::VideoProcessor,
         surface: usize,
     ) -> Result<(), String> {
+        if rtx.comparison.is_some()
+            && matches!(
+                self,
+                Self::Rtx(_) | Self::Upscale(_) | Self::Input(_) | Self::ProcessingScale(_)
+            )
+        {
+            Self::Compare(false).apply(p, shader, rife, rtx, surface)?;
+        }
         match self {
+            Self::Compare(true) if rtx.comparison.is_none() => {
+                if rtx.requested.super_resolution {
+                    rtx.set(
+                        p,
+                        crate::rtx::Effects {
+                            hdr: rtx.requested.hdr,
+                            super_resolution: false,
+                        },
+                        surface,
+                    )?;
+                    rtx.comparison = Some(crate::rtx::Spatial::Nvidia);
+                } else if p.property(c"glsl-shaders").is_some_and(|v| !v.is_empty()) {
+                    p.command(&["change-list", "glsl-shaders", "clr", ""])?;
+                    rtx.comparison = Some(crate::rtx::Spatial::Anime);
+                } else {
+                    return Err("Enable a spatial enhancement before comparing it.".into());
+                }
+                Ok(())
+            }
+            Self::Compare(false) => {
+                if let Some(old) = rtx.comparison.take() {
+                    let result = match old {
+                        crate::rtx::Spatial::Anime => {
+                            Self::Upscale(true).apply(p, shader, rife, rtx, surface)
+                        }
+                        crate::rtx::Spatial::Nvidia => rtx.set(
+                            p,
+                            crate::rtx::Effects {
+                                hdr: rtx.requested.hdr,
+                                super_resolution: true,
+                            },
+                            surface,
+                        ),
+                    };
+                    if result.is_err() {
+                        rtx.comparison = Some(old);
+                    }
+                    result
+                } else {
+                    Ok(())
+                }
+            }
+            Self::Compare(true) => Ok(()),
             Self::Picture(next) => {
                 if let Err(e) = next.apply(p) {
                     rtx.picture.apply(p)?;
@@ -197,6 +252,7 @@ impl Control {
 }
 
 enum Request {
+    Screenshot(PathBuf, PathBuf, mpsc::Sender<Result<(), String>>),
     OpenFailed(String),
     Options(crate::settings::Options, mpsc::Sender<Result<(), String>>),
     Subtitle(PathBuf),
@@ -215,6 +271,15 @@ pub struct Engine {
 }
 
 impl Engine {
+    pub fn screenshot(
+        &self,
+        source: PathBuf,
+        destination: PathBuf,
+    ) -> Result<mpsc::Receiver<Result<(), String>>, String> {
+        let (tx, rx) = mpsc::channel();
+        self.send(Request::Screenshot(source, destination, tx))?;
+        Ok(rx)
+    }
     pub fn options(
         &self,
         options: crate::settings::Options,
@@ -359,6 +424,12 @@ fn run(
         }
     })?;
     let mut option_error = saved_options.err();
+    let mut devices = crate::settings::audio_devices(&player);
+    if options.recover_audio(&devices) {
+        option_error =
+            Some("The saved audio device is unavailable. Using the default Windows output.".into());
+        journal.event("audio_output_recovered", serde_json::Value::Null);
+    }
     if library.is_some_and(|db| db.recovered()) {
         option_error=Some("The library database is damaged. Its original file is preserved. New settings use library-recovery.sqlite3.".into());
         journal.event("library_recovered", serde_json::Value::Null);
@@ -390,7 +461,6 @@ fn run(
             .is_some_and(|p| rtx_player::provider::verify_export_reader(p).is_ok());
     let mut last = Instant::now();
     let mut error = option_error;
-    let mut devices = crate::settings::audio_devices(&player);
     let mut device_check = Instant::now();
     let mut loading = false;
     let mut media_failed = false;
@@ -431,6 +501,24 @@ fn run(
     };
     loop {
         match rx.recv_timeout(Duration::from_millis(25)) {
+            Ok(Request::Screenshot(source, path, reply)) => {
+                let result = (|| {
+                    if player
+                        .property(c"path")
+                        .as_deref()
+                        .map(std::path::Path::new)
+                        != Some(source.as_path())
+                    {
+                        return Err("The selected video changed.".into());
+                    }
+                    player.command(&[
+                        "screenshot-to-file",
+                        path.to_str().ok_or("Unsupported screenshot filename")?,
+                        "window",
+                    ])
+                })();
+                let _ = reply.send(result);
+            }
             Ok(Request::OpenFailed(message)) => {
                 media_failed = true;
                 loading = false;
@@ -504,6 +592,23 @@ fn run(
                 }
             }
             Ok(Request::Control(command)) => {
+                if let Control::Preset(preset) = command {
+                    error = if safe_mode {
+                        Some("Safe mode disables enhancement presets.".into())
+                    } else {
+                        preset
+                            .apply(
+                                &mut player,
+                                &shader,
+                                &mut rife,
+                                &mut rtx,
+                                surface,
+                                &mut adaptive,
+                            )
+                            .err()
+                    };
+                    continue;
+                }
                 if safe_mode
                     && matches!(
                         &command,
@@ -555,6 +660,7 @@ fn run(
                 Ok(PlaybackEvent::Idle) => break,
                 Ok(PlaybackEvent::Shutdown) => return Ok(()),
                 Ok(PlaybackEvent::Loaded) => {
+                    rtx.comparison = None;
                     if let Err(e) = rtx.input.change(&mut player, Default::default()) {
                         error = Some(e);
                     }
@@ -692,6 +798,20 @@ fn run(
                     error = Some("HDR output became unavailable. SDR playback restored.".into());
                 }
             }
+            if device_check.elapsed() > Duration::from_secs(8) {
+                devices = crate::settings::audio_devices(&player);
+                if options.recover_audio(&devices) {
+                    error = Some(match player.command(&["set", "audio-device", "auto"]) {
+                        Ok(()) => {
+                            "The audio device disconnected. Using the default Windows output."
+                                .into()
+                        }
+                        Err(e) => format!("Choose an available audio output in Settings: {e}"),
+                    });
+                    journal.event("audio_output_recovered", serde_json::Value::Null);
+                }
+                device_check = Instant::now();
+            }
             let number = |key| {
                 player
                     .property(key)
@@ -717,11 +837,9 @@ fn run(
             } else {
                 "playing"
             };
-            if device_check.elapsed() > Duration::from_secs(8) {
-                devices = crate::settings::audio_devices(&player);
-                device_check = Instant::now();
-            }
             let state = Snapshot {
+                comparing: rtx.comparison.is_some(),
+                compact: false,
                 renderer_adapter: renderer_adapter.clone(),
                 recovered_library: library.is_some_and(|db| db.recovered()),
                 picture: rtx.picture.clone(),

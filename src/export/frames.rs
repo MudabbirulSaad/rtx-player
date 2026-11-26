@@ -75,3 +75,29 @@ impl Drop for Frames {
         let _ = self.child.wait();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    #[ignore = "requires installed RIFE, the export reader and a 24 fps local test video"]
+    fn reports_an_interrupted_running_frame_server() {
+        let runtime = std::path::PathBuf::from(std::env::var_os("RTX_TEST_RUNTIME").unwrap());
+        let media = std::path::PathBuf::from(std::env::var_os("RTX_TEST_MEDIA").unwrap());
+        let app = runtime.parent().unwrap();
+        crate::provider::verify_rife_export(app).unwrap();
+        let mut frames = Frames::start(app, &media, 60).unwrap();
+        let mut signature = [0; 9];
+        frames
+            .child
+            .stdout
+            .as_mut()
+            .unwrap()
+            .read_exact(&mut signature)
+            .unwrap();
+        assert_eq!(&signature, b"YUV4MPEG2");
+        frames.child.kill().unwrap();
+        assert!(frames.finish(Ok(())).is_err());
+        assert!(frames.child.try_wait().unwrap().is_some());
+    }
+}

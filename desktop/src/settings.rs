@@ -30,6 +30,17 @@ impl Default for Options {
     }
 }
 impl Options {
+    pub fn recover_audio(&mut self, devices: &[Device]) -> bool {
+        if self.audio_device != "auto"
+            && !devices.is_empty()
+            && !devices.iter().any(|d| d.name == self.audio_device)
+        {
+            self.audio_device = "auto".into();
+            true
+        } else {
+            false
+        }
+    }
     pub fn validate(&self) -> Result<(), String> {
         if ![1.5, 2., 3., 4.].contains(&self.scale)
             || ![5, 10, 30].contains(&self.seek_seconds)

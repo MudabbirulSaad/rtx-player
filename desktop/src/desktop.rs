@@ -36,6 +36,11 @@ fn transport(engine: State<'_, Engine>, command: Control) -> Result<(), String> 
 fn playback_state(window: tauri::Window, engine: State<'_, Engine>) -> Result<Snapshot, String> {
     let mut snapshot = engine.state()?;
     let view = window.state::<Surfaces>();
+    snapshot.compact = view
+        .compact
+        .lock()
+        .map_err(|_| "Compact view unavailable")?
+        .is_some();
     if view.fullscreen.load(Ordering::Relaxed) {
         snapshot.fullscreen = true;
         let size = window.inner_size().map_err(|e| e.to_string())?;
@@ -58,6 +63,15 @@ fn playback_state(window: tauri::Window, engine: State<'_, Engine>) -> Result<Sn
 
 #[tauri::command]
 fn fullscreen(window: tauri::Window) -> Result<(), String> {
+    if window
+        .state::<Surfaces>()
+        .compact
+        .lock()
+        .map_err(|_| "Compact view unavailable")?
+        .is_some()
+    {
+        toggle_compact(window.clone())?;
+    }
     let next = !window.is_fullscreen().map_err(|e| e.to_string())?;
     window.set_fullscreen(next).map_err(|e| e.to_string())?;
     let view = window.state::<Surfaces>();
@@ -87,12 +101,60 @@ fn layout(size: PhysicalSize<u32>, scale: f64) -> (u32, u32) {
 }
 
 struct Surfaces {
+    compact: std::sync::Mutex<Option<WindowPlacement>>,
     video: usize,
     controls: tauri::Webview,
     expanded: AtomicBool,
     fullscreen: AtomicBool,
     hover: AtomicBool,
     keyboard: AtomicBool,
+}
+struct WindowPlacement {
+    size: PhysicalSize<u32>,
+    pos: PhysicalPosition<i32>,
+    maximized: bool,
+    top: bool,
+}
+
+#[tauri::command]
+fn toggle_compact(window: tauri::Window) -> Result<(), String> {
+    let surfaces = window.state::<Surfaces>();
+    let mut saved = surfaces
+        .compact
+        .lock()
+        .map_err(|_| "Compact view unavailable")?;
+    if window.is_fullscreen().map_err(|e| e.to_string())? {
+        return Err("Exit fullscreen before opening compact view.".into());
+    }
+    if let Some(old) = saved.as_ref() {
+        window
+            .set_always_on_top(old.top)
+            .map_err(|e| e.to_string())?;
+        window.set_size(old.size).map_err(|e| e.to_string())?;
+        window.set_position(old.pos).map_err(|e| e.to_string())?;
+        if old.maximized {
+            window.maximize().map_err(|e| e.to_string())?;
+        }
+        *saved = None;
+    } else {
+        let maximized = window.is_maximized().map_err(|e| e.to_string())?;
+        let top = window.is_always_on_top().map_err(|e| e.to_string())?;
+        if maximized {
+            window.unmaximize().map_err(|e| e.to_string())?;
+        }
+        let old = WindowPlacement {
+            size: window.inner_size().map_err(|e| e.to_string())?,
+            pos: window.outer_position().map_err(|e| e.to_string())?,
+            maximized,
+            top,
+        };
+        *saved = Some(old);
+        window
+            .set_size(tauri::LogicalSize::new(640., 420.))
+            .map_err(|e| e.to_string())?;
+        window.set_always_on_top(true).map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 impl Surfaces {
     fn arrange(&self, size: PhysicalSize<u32>, scale: f64) -> tauri::Result<()> {
@@ -141,6 +203,7 @@ const SS_BLACKRECT: u32 = 4;
 pub fn run() -> tauri::Result<()> {
     tauri::Builder::default()
         .manage(Exports::default())
+        .manage(crate::capture::Preview::default())
         .manage(crate::setup::Setup::default())
         .setup(|app| {
             app.manage(crate::gpu::Gpus::start()?);
@@ -179,6 +242,7 @@ pub fn run() -> tauri::Result<()> {
                 PhysicalSize::new(size.width, controls),
             )?;
             app.manage(Surfaces {
+                compact: Default::default(),
                 video: surface,
                 controls: bar,
                 expanded: AtomicBool::new(false),
@@ -301,11 +365,14 @@ pub fn run() -> tauri::Result<()> {
             crate::setup::setup_provider,
             crate::setup::provider_status,
             crate::setup::cancel_provider,
+            crate::capture::seek_preview,
+            crate::capture::save_frame,
             crate::export::export_status,
             crate::export::cancel_export,
             open_media,
             playback_state,
             transport,
+            toggle_compact,
             fullscreen
         ])
         .run(tauri::generate_context!())

@@ -2,7 +2,7 @@
 
 RTX Player opens local video in a native Direct3D 11 surface on Windows x64. A separate WebView hosts the playback controls. The desktop app supports opening a file, pause, seeking, volume, mute, playback speed and fullscreen. For enlarged animation, the Anime4K button applies a small 2× convolutional upscaler. The shader runs when the output exceeds 1.2 times the source in both dimensions. The command-line player uses the same libmpv runtime. Neither requires an AI runtime.
 
-## Build the desktop app
+## Start the player
 
 To use a packaged build, extract the portable ZIP into a writable directory and launch `rtx-player-desktop.exe`, or run the current-user setup executable. Open a file with Ctrl+O. Baseline playback works immediately. Under Enhancements, enable effects individually and use Playback statistics to check the actual processing path.
 
@@ -10,7 +10,7 @@ To use a packaged build, extract the portable ZIP into a writable directory and 
 
 [Hardware compatibility](docs/compatibility.md) · [Performance measurements](docs/performance.md) · [Architecture](docs/architecture.md) · [Local data and uninstall](docs/security.md) · [Development release notes](docs/release-notes.md)
 
-### From source
+## Build from source
 
 Use Rust 1.91.1, Node.js with npm, Python 3.11 or newer, and Windows tar with 7z support. On Windows, Tauri requires WebView2. The desktop build has been exercised with the x86-64 Windows GNU LLVM Rust toolchain and LLVM-MinGW UCRT linker.
 
@@ -23,6 +23,8 @@ target/debug/rtx-player-desktop.exe
 ```
 
 Open a file with the Open button or Ctrl+O in the controls. You can also pass a local file path at launch. Keep WebView2Loader.dll and libmpv-2.dll beside the executable. The runtime download script checks the archive and DLL against the pinned sizes and SHA-256 digests in the build manifest.
+
+Hover over the timeline to preview a decoded source frame. The camera button saves the current rendered video as a new PNG. Compact player keeps a smaller window above other windows until you return to its original size. When a spatial effect is active, **Compare original** shows the conventional scaling path for the same video. Pause first to compare one frame.
 
 For the command-line player, use `cargo build --release --locked -p rtx-player`, fetch its runtime into the release directory, and run `rtx-player.exe <file>`. Space pauses, the arrow keys seek, and F toggles fullscreen in that window.
 

@@ -275,6 +275,27 @@ pub fn remove_playlist_item(
 mod tests {
     use super::*;
     #[test]
+    fn full_database_rolls_back_a_folder_refresh() {
+        let root = tempfile::tempdir().unwrap();
+        let db = Library::open(&root.path().join("library.sqlite3")).unwrap();
+        let entry = |name: &str| MediaFile {
+            title: name.into(),
+            path: root.path().join("media.mp4"),
+            bytes: 100,
+        };
+        let id = db
+            .insert_collection("Fixture", Some(root.path()), &[entry("First")])
+            .unwrap();
+        db.with(|c| {
+            let pages: i64 = c.query_row("PRAGMA page_count", [], |r| r.get(0))?;
+            c.pragma_update(None, "max_page_count", pages)
+        })
+        .unwrap();
+        let full = db.insert_collection("Fixture", Some(root.path()), &[entry(&"x".repeat(65536))]);
+        assert!(full.unwrap_err().contains("full"));
+        assert_eq!(db.members(id, "").unwrap()[0].title, "First");
+    }
+    #[test]
     fn collections_survive_reopen_and_history_cleanup() {
         let folder = tempfile::tempdir().unwrap();
         std::fs::write(folder.path().join("B.mp4"), b"b").unwrap();

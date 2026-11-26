@@ -236,10 +236,20 @@ fn run_encoder(
 }
 
 pub fn thumbnail(app: &Path, source: &Path) -> Result<Vec<u8>, String> {
+    thumbnail_at(app, source, None)
+}
+
+pub fn thumbnail_at(app: &Path, source: &Path, seconds: Option<f64>) -> Result<Vec<u8>, String> {
     let container = crate::media::demuxer(source)?;
     let folder = tempfile::tempdir().map_err(|e| e.to_string())?;
     let dest = folder.path().join("poster.jpg");
     let mut command = Command::new(app.join("tools/export/ffmpeg.exe"));
+    if let Some(time) = seconds {
+        if !time.is_finite() || time < 0. {
+            return Err("Invalid preview time.".into());
+        }
+        command.args(["-ss", &format!("{time:.3}")]);
+    }
     command
         .args([
             "-nostdin",
@@ -258,7 +268,11 @@ pub fn thumbnail(app: &Path, source: &Path) -> Result<Vec<u8>, String> {
             "-frames:v",
             "1",
             "-vf",
-            "thumbnail=8,scale=256:144:force_original_aspect_ratio=decrease",
+            if seconds.is_some() {
+                "scale=256:144:force_original_aspect_ratio=decrease"
+            } else {
+                "thumbnail=8,scale=256:144:force_original_aspect_ratio=decrease"
+            },
             "-c:v",
             "mjpeg",
             "-q:v",

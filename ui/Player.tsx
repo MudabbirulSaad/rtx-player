@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
-import { Activity, FolderOpen, Maximize, Pause, Play, Volume2 } from 'lucide-react'
+import { Activity, Camera, FolderOpen, Maximize, Pause, PictureInPicture2, Play, Volume2 } from 'lucide-react'
+import {Timeline} from './Timeline'
 import { ExportPanel } from './ExportPanel'
 import { LibraryPanel } from './LibraryPanel'
 import { Enhancements,type ProcessingInput } from './Enhancements'
@@ -14,6 +15,9 @@ type Playback = TrackState & {
   input:ProcessingInput; display_fps:number|null
   picture:PictureOptions
   recovered_library:boolean
+  cache_seconds:number|null
+  compact:boolean
+  comparing:boolean
   phase:string;safe_mode:boolean;options:Options;audio_devices:{name:string;description:string}[]
   fullscreen:boolean; queue_size:number; queue_index:number
   title: string | null; position: number | null; duration: number | null
@@ -27,7 +31,7 @@ type Playback = TrackState & {
   target_transfer: string | null; target_primaries: string | null; target_peak: number | null
   upscale: boolean; paused: boolean; volume: number; speed: number; decoder: string | null; error: string | null
 }
-type Command = TrackCommand | {kind:'picture';value:PictureOptions}| {kind:'input';value:ProcessingInput} | { kind: 'rtx'; value: Effects } | { kind: 'upscale'|'adaptive'; value: boolean } | { kind: 'toggle' | 'mute' | 'next' | 'previous' } | { kind: 'volume' | 'seek' | 'speed' | 'interpolate' | 'processingScale'; value: number }
+type Command = TrackCommand | {kind:'preset';value:string} | {kind:'picture';value:PictureOptions}| {kind:'input';value:ProcessingInput} | { kind: 'rtx'; value: Effects } | { kind: 'upscale'|'adaptive'|'compare'; value: boolean } | { kind: 'toggle' | 'mute' | 'next' | 'previous' } | { kind: 'volume' | 'seek' | 'speed' | 'interpolate' | 'processingScale'; value: number }
 
 function clock(seconds: number) {
   const t = Math.floor(Math.max(0, seconds))
@@ -125,7 +129,7 @@ export function Player() {
   if(settings && state?.phase)return <Settings close={()=>setSettings(false)} initial={state.options} devices={state.audio_devices} safe={state.safe_mode} rife={state.rife_available} reader={state.rife_export_available} recovered={state.recovered_library}/>
   if(tracks&&state) return <Tracks state={state} close={()=>setTracks(false)} send={v=>void transport(v)} add={()=>void request('open_subtitle')} error={issue || state.error || ''}/>
   if (enhancements) return <Enhancements close={()=>setEnhancements(false)} issue={setIssue}
-    picture={state?.picture} changePicture={v=>void transport({kind:'picture',value:v})}
+    preset={v=>void transport({kind:'preset',value:v})} picture={state?.picture} changePicture={v=>void transport({kind:'picture',value:v})}
     input={state?.input??{height:null,automatic:false,fps24:false}} changeInput={v=>void transport({kind:'input',value:v})} sourceFps={state?.source_fps??null} displayFps={state?.display_fps??null}
     adaptive={Boolean(state?.adaptive)} requested={state?.requested_factor||1} reason={state?.adaptation??null} changeAdaptive={v=>void transport({kind:'adaptive',value:v})} error={issue||state?.error||''}
     playing={playing && !state?.safe_mode} interpolationAvailable={playing && Boolean(state?.rife_available) && sdrSource} providerProblem={state?.rife_problem} hdrAvailable={playing && !state?.safe_mode && sdrSource && Boolean(state?.display_hdr)}
@@ -140,9 +144,7 @@ export function Player() {
       <span className="title truncate" title={state?.title ?? undefined}>{state?.title ?? 'Open a video'}</span>}
       <span className="time">{clock(at)} <span>/</span> {clock(duration)}</span>
     </div>
-    <input type="range" className="timeline" aria-label="Seek" min={0} max={duration || 1} step={0.1}
-      value={at} disabled={!duration} onChange={e => setScrub(Number(e.target.value))}
- />
+    <Timeline key={state?.title} at={at} duration={duration} buffered={state?.cache_seconds??0} seek={setScrub}/>
     <div className="flex items-center gap-2">
       <button className="primary" title={state?.paused ? 'Play' : 'Pause'} disabled={!playing}
         aria-label={state?.paused ? 'Play' : 'Pause'} onClick={() => void transport({kind:'toggle'})}>
@@ -150,6 +152,7 @@ export function Player() {
       <button onClick={() => void request('open_media')} title="Open file (Ctrl+O)"><FolderOpen/>Open</button>
       <button onClick={()=>setLibrary(true)}>Library</button>
       <button disabled={!state?.phase} onClick={()=>setSettings(true)}>Settings</button>
+      <button disabled={!playing} title="Save current video frame" aria-label="Save video frame" onClick={()=>void request('save_frame')}><Camera/></button>
       {state&&state.queue_size>1&&<><button aria-label="Previous in playlist" disabled={state.queue_index===0} onClick={()=>void transport({kind:'previous'})}>Previous</button>
         <button aria-label="Next in playlist" disabled={state.queue_index+1>=state.queue_size} onClick={()=>void transport({kind:'next'})}>Next</button></>}
       <button disabled={!playing} onClick={()=>setTracks(true)}>Tracks</button>
@@ -167,6 +170,7 @@ export function Player() {
           {[0.25,0.5,0.75,1,1.25,1.5,2,3,4].map(x => <option key={x} value={x}>{x}×</option>)}
         </select>
         <button aria-label="Toggle fullscreen" title="Fullscreen" onClick={() => void request('fullscreen')}><Maximize/></button>
+        <button aria-label="Compact player" aria-pressed={Boolean(state?.compact)} disabled={state?.fullscreen} title="Compact player" onClick={()=>void request('toggle_compact')}><PictureInPicture2/></button>
       </div>
     </div>
     <div className="enhancements flex items-center gap-2" role="group" aria-label="Video enhancements">
@@ -174,6 +178,8 @@ export function Player() {
       <button aria-pressed={Boolean(state?.upscale)} disabled={!playing || state?.safe_mode} title="Anime4K neural upscaling for enlarged video" onClick={() => void transport({kind:'upscale',value:!state?.upscale})}>Anime4K</button>
       <button aria-label="RTX Super Resolution" aria-pressed={Boolean(active?.super_resolution)} disabled={!playing || state?.safe_mode} title={`Apply ${state?.processing_scale || 2}× NVIDIA video super resolution`} onClick={() => void transport({kind:'rtx',value:{...effects,super_resolution:!effects.super_resolution}})}>RTX VSR</button>
       <button aria-pressed={Boolean(active?.hdr)} disabled={!playing || state?.safe_mode || (!effects.hdr && (!sdrSource || !state?.display_hdr))} title={hdrHint} onClick={() => void transport({kind:'rtx',value:{...effects,hdr:!effects.hdr}})}>RTX HDR</button>
+      {(state?.upscale||effects.super_resolution||state?.comparing)&&<button aria-label="Compare original scaling" aria-pressed={Boolean(state?.comparing)}
+        onClick={()=>void transport({kind:'compare',value:!state?.comparing})}>{state?.comparing?'Return to enhanced':'Compare original'}</button>}
       <select aria-label="Frame interpolation" disabled={!playing || !state?.rife_available || !sdrSource} title="RIFE interpolation requires the optional provider and SDR video" value={state?.factor || 1} onChange={e => void transport({kind:'interpolate',value:Number(e.target.value)})}>
         {state && state.factor>1 && ![2,2.5,3,4,5,6].includes(state.factor) && <option value={state.factor}>RIFE {state.factor.toFixed(3)}×</option>}
         <option value={1}>Original FPS</option>{[2,2.5,3,4,5,6].map(n => <option key={n} value={n}>RIFE {n}×</option>)}
