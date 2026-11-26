@@ -6,6 +6,8 @@ Rust crate versions and registry checksums are recorded in Cargo.lock. libloadin
 
 RTX Player source is licensed under GPL-3.0-or-later.
 
+The optional export reader is BestSource R23 by Fredrik Mellbin. Its source uses the MIT license. The setup command downloads the Windows binary from its publisher and verifies both the archive and extracted DLL. [BestSource R23 distribution](https://github.com/vapoursynth/bestsource/releases/tag/R23) · [License](https://github.com/vapoursynth/bestsource/blob/R23/LICENSE)
+
 Windows export uses FFmpeg 9.1 from Gyan Doshi's full build. The setup script verifies the release archive and executable independently. This build includes libplacebo for Vulkan shader processing and GPL-licensed codecs. Inspect its configuration with `tools/export/ffmpeg.exe -buildconf` and its license with `-L`. [Pinned build](https://github.com/GyanD/codexffmpeg/releases/tag/9.1) · [FFmpeg source](https://github.com/FFmpeg/FFmpeg/tree/n9.1) · [FFmpeg licensing](https://ffmpeg.org/legal.html)
 
 The Anime4K small 2× CNN shader is copyright bloc97 and licensed under MIT. Its source and license are included under assets/Anime4K. [Upstream revision](https://github.com/bloc97/Anime4K/tree/7684e9586f8dcc738af08a1cdceb024cc184f426)

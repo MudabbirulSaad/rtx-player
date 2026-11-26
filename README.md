@@ -46,6 +46,8 @@ Anime4K enlarges the image using the same shader as playback. Its default output
 
 The encoder preserves video timestamps and chapters and transcodes audio to AAC. MKV copies subtitles and attachments. MP4 converts text subtitles to timed text. Use MKV for bitmap subtitles. The app checks the temporary file's duration, resolution, audio and requested HDR signaling before saving it under a new name. Cancelling removes the incomplete file.
 
+To export interpolated frames, first install RIFE, then run `python -m scripts.fetch_rife target/debug/rtx-player-desktop.exe --export-reader` and restart the player. Choose a target between 48 and 144 fps, above the source rate and within the sixfold interpolation limit. The reader checks the source timestamps before rendering. This path supports zero-based constant-rate video. Choose Original FPS to retain a variable-rate timeline. The frame server streams generated images to the encoder and closes when the job finishes or is cancelled.
+
 ## Library and settings
 
 Choose Tracks to switch audio or subtitle streams, open an external subtitle file, adjust their timing or seek to a chapter.

@@ -1,4 +1,5 @@
 //! Verified local video exports. The encoder never receives the final output filename.
+mod frames;
 use crate::playback::{PlaybackEvent, Player};
 use std::io::{BufRead, BufReader, Read};
 use std::os::windows::process::CommandExt;
@@ -23,12 +24,19 @@ pub struct Profile {
     pub anime: bool,
     pub hdr: bool,
     pub bitrate_kbps: Option<u32>,
+    pub target_fps: Option<u32>,
 }
 
 impl Profile {
     fn filter(&self) -> Result<String, String> {
         if self.quality > 51 {
-            return Err("H.264 quality must be between 0 and 51.".into());
+            return Err("Encoding quality must be between 0 and 51.".into());
+        }
+        if self
+            .target_fps
+            .is_some_and(|rate| ![48, 60, 72, 96, 120, 144].contains(&rate))
+        {
+            return Err("Choose a supported export frame rate.".into());
         }
         if self
             .bitrate_kbps
@@ -81,6 +89,9 @@ struct Media {
     gamma: String,
     primaries: Option<String>,
     pixel_format: Option<String>,
+    fps: Option<f64>,
+    matrix: Option<String>,
+    levels: Option<String>,
 }
 
 fn inspect(runtime: &Path, path: &Path, cancel: &AtomicBool) -> Result<Media, String> {
@@ -135,6 +146,11 @@ fn inspect(runtime: &Path, path: &Path, cancel: &AtomicBool) -> Result<Media, St
             gamma,
             primaries: probe.property(c"video-params/primaries"),
             pixel_format: probe.property(c"video-params/pixelformat"),
+            fps: probe
+                .property(c"container-fps")
+                .and_then(|s| s.parse().ok()),
+            matrix: probe.property(c"video-params/colormatrix"),
+            levels: probe.property(c"video-params/colorlevels"),
         });
     }
     Err("Could not inspect a finite local video stream.".into())
@@ -150,12 +166,13 @@ fn check_cancel(cancel: &AtomicBool) -> Result<(), String> {
 
 fn run_encoder(
     mut command: Command,
+    input: Stdio,
     cancel: &AtomicBool,
     mut report: impl FnMut(u64),
 ) -> Result<(), String> {
     let mut child = command
         .creation_flags(0x08000000)
-        .stdin(Stdio::null())
+        .stdin(input)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -268,6 +285,9 @@ pub fn transcode(
         .map_err(|e| e.to_string())?
         .into_temp_path();
     let application = runtime.parent().ok_or("Missing application directory")?;
+    if profile.target_fps.is_some() {
+        crate::provider::verify_rife_export(application)?;
+    }
     let encoder = application.join("tools/export/ffmpeg.exe");
     let command_for = |hardware: bool| {
         let mut command = Command::new(&encoder);
@@ -286,25 +306,67 @@ pub fn transcode(
                 "file",
                 "-i",
             ])
-            .arg(&source)
-            .args([
-                "-map",
-                "0:V:0",
-                "-map",
-                "0:a?",
-                "-map",
-                "0:s?",
-                "-map_chapters",
-                "0",
-                "-map_metadata",
-                "0",
-                "-vf",
-                &filter,
-                "-fps_mode",
-                "passthrough",
-                "-c:a",
-                "aac",
+            .arg(&source);
+        let video = if profile.target_fps.is_some() {
+            // Y4M carries the chroma layout but has limited color metadata.
+            let matrix = match input.matrix.as_deref() {
+                Some("bt.601") => "smpte170m",
+                Some("bt.2020-ncl") => "bt2020nc",
+                _ => "bt709",
+            };
+            let primaries = match input.primaries.as_deref() {
+                Some("bt.601-525") => "smpte170m",
+                Some("bt.601-625") => "bt470bg",
+                Some("bt.2020") => "bt2020",
+                _ => "bt709",
+            };
+            let trc = if input.gamma == "srgb" {
+                "iec61966-2-1"
+            } else {
+                "bt709"
+            };
+            command.args([
+                "-f",
+                "yuv4mpegpipe",
+                "-protocol_whitelist",
+                "pipe",
+                "-colorspace",
+                matrix,
+                "-color_primaries",
+                primaries,
+                "-color_trc",
+                trc,
+                "-color_range",
+                if input.levels.as_deref() == Some("full") {
+                    "pc"
+                } else {
+                    "tv"
+                },
+                "-i",
+                "pipe:0",
             ]);
+            "1:v:0"
+        } else {
+            "0:V:0"
+        };
+        command.args([
+            "-map",
+            video,
+            "-map",
+            "0:a?",
+            "-map",
+            "0:s?",
+            "-map_chapters",
+            "0",
+            "-map_metadata",
+            "0",
+            "-vf",
+            &filter,
+            "-fps_mode",
+            "passthrough",
+            "-c:a",
+            "aac",
+        ]);
         if format == "matroska" {
             command.args(["-c:s", "copy", "-map", "0:t?", "-c:t", "copy"]);
         } else {
@@ -353,23 +415,50 @@ pub fn transcode(
     };
     let mut report =
         |micros| progress((micros as f64 / 1_000_000.0 / input.duration).clamp(0., 0.99));
-    let (command, mut codec) = command_for(profile.encoder != Encoder::Software);
-    if let Err(e) = run_encoder(command, cancel, &mut report) {
-        let nvenc_error = e.contains("[h264_nvenc") || e.contains("[hevc_nvenc");
-        if profile.encoder != Encoder::Auto || !nvenc_error {
-            return Err(e);
-        }
+    let mut encode = |hardware| -> Result<&'static str, String> {
         check_cancel(cancel)?;
-        let (fallback, software) = command_for(false);
-        run_encoder(fallback, cancel, &mut report)?;
-        codec = software;
-    }
+        let mut frames = profile
+            .target_fps
+            .map(|fps| frames::Frames::start(application, &source, fps))
+            .transpose()?;
+        let stdin = frames
+            .as_mut()
+            .map(frames::Frames::output)
+            .unwrap_or_else(Stdio::null);
+        let (command, codec) = command_for(hardware);
+        let result = run_encoder(command, stdin, cancel, &mut report);
+        if let Some(frames) = &mut frames {
+            frames.finish(result)?
+        } else {
+            result?
+        }
+        Ok(codec)
+    };
+    let codec = match encode(profile.encoder != Encoder::Software) {
+        Ok(codec) => codec,
+        Err(e) => {
+            let nvenc_error = e.contains("[h264_nvenc") || e.contains("[hevc_nvenc");
+            if profile.encoder != Encoder::Auto || !nvenc_error {
+                return Err(e);
+            }
+            check_cancel(cancel)?;
+            encode(false)?
+        }
+    };
     let output = inspect(runtime, &temporary, cancel)?;
     if (output.duration - input.duration).abs() > 0.25
         || output.height != height
         || (input.audio && !output.audio)
+        || profile.target_fps.is_some_and(|rate| {
+            !output
+                .fps
+                .is_some_and(|actual| (actual - f64::from(rate)).abs() < 0.1)
+        })
     {
-        return Err("The encoded file failed duration, resolution or audio verification.".into());
+        return Err(
+            "The encoded file failed duration, resolution, frame rate or audio verification."
+                .into(),
+        );
     }
     if profile.hdr
         && (output.gamma != "pq"
@@ -402,6 +491,7 @@ mod tests {
             anime: false,
             hdr: false,
             bitrate_kbps: None,
+            target_fps: None,
         };
         assert!(profile.filter().is_err());
         profile.height = Some(720);
@@ -422,6 +512,7 @@ mod tests {
             anime: false,
             hdr: false,
             bitrate_kbps: None,
+            target_fps: None,
         };
         let result = transcode(
             Path::new("missing.dll"),

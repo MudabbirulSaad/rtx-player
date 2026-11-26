@@ -28,6 +28,7 @@ pub struct Options {
     #[serde(default)]
     hdr: bool,
     bitrate_kbps: Option<u32>,
+    target_fps: Option<u32>,
 }
 
 #[derive(Clone, Default, Serialize)]
@@ -88,6 +89,7 @@ impl Exports {
             anime: options.anime,
             hdr: options.hdr,
             bitrate_kbps: options.bitrate_kbps,
+            target_fps: options.target_fps,
         };
         let mut initial = self
             .status

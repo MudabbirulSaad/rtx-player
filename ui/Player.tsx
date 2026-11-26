@@ -12,7 +12,7 @@ type Playback = TrackState & {
   fullscreen:boolean
   title: string | null; position: number | null; duration: number | null
   source_fps: number | null; avsync: number | null; dropped: number | null
-  rife_available: boolean; rife_problem: string | null; factor: number; filtered_fps: number | null
+  rife_available: boolean; rife_export_available:boolean; rife_problem: string | null; factor: number; filtered_fps: number | null
   requested_factor:number;adaptive:boolean;adaptation:string|null
   requested_rtx: Effects; active_rtx: Effects; display_hdr: boolean | null; display_bits: number | null; hdr10_swapchain: boolean | null
   processed_width: number | null; processed_height: number | null; processing_scale:number
@@ -113,7 +113,7 @@ export function Player() {
     rate={v=>void transport({kind:'interpolate',value:v})} resize={v=>void transport({kind:'processingScale',value:v})}
     anime={()=>void transport({kind:'upscale',value:!state?.upscale})} nvidia={()=>void transport({kind:'rtx',value:{...effects,super_resolution:!effects.super_resolution}})}
     convert={()=>void transport({kind:'rtx',value:{...effects,hdr:!effects.hdr}})} timing={timing} output={output}/>
-  if (exporting) return <ExportPanel close={()=>setExporting(false)}/>
+  if (exporting) return <ExportPanel close={()=>setExporting(false)} interpolationAvailable={Boolean(state?.rife_export_available) && sdrSource}/>
   return <section className="shell flex flex-col justify-center gap-2 px-5" aria-label="Playback controls">
     <div className="flex items-center justify-between gap-3">
       {stats && timing ? <span className="metrics truncate" title={timing}>{timing}</span> :

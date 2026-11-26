@@ -22,6 +22,7 @@ fn transcode_and_cancel_real_media() {
         anime: false,
         hdr: false,
         bitrate_kbps: None,
+        target_fps: None,
     };
     let cancel = AtomicBool::new(false);
     let mut last = 0.;
@@ -98,6 +99,7 @@ fn encode_neural_upscale_and_hdr_with_nvenc() {
         anime: true,
         hdr: true,
         bitrate_kbps: None,
+        target_fps: None,
     };
     let codec = transcode(
         &runtime,
@@ -114,4 +116,48 @@ fn encode_neural_upscale_and_hdr_with_nvenc() {
         decoded_frames(&ffmpeg, &source),
         decoded_frames(&ffmpeg, &dest)
     );
+}
+
+#[test]
+#[ignore = "requires 24 fps CFR fixture, RIFE export reader, Vulkan and NVENC"]
+fn interpolate_every_frame_into_a_60_fps_hdr_export() {
+    let runtime = PathBuf::from(std::env::var_os("RTX_TEST_RUNTIME").unwrap());
+    let source = PathBuf::from(std::env::var_os("RTX_TEST_MEDIA").unwrap());
+    let folder = tempfile::tempdir().unwrap();
+    let dest = folder.path().join("combined.mp4");
+    let profile = Profile {
+        encoder: Encoder::Nvenc,
+        height: None,
+        quality: 24,
+        denoise: false,
+        anime: true,
+        hdr: true,
+        bitrate_kbps: None,
+        target_fps: Some(60),
+    };
+    assert_eq!(
+        transcode(
+            &runtime,
+            &source,
+            &dest,
+            &profile,
+            &AtomicBool::new(false),
+            |_| {}
+        )
+        .unwrap(),
+        "hevc_nvenc"
+    );
+    let ffmpeg = runtime.with_file_name("tools").join("export/ffmpeg.exe");
+    assert_eq!(
+        decoded_frames(&ffmpeg, &dest),
+        decoded_frames(&ffmpeg, &source) * 5 / 2
+    );
+    let flag = AtomicBool::new(false);
+    let cancelled = folder.path().join("cancelled.mkv");
+    let result = transcode(&runtime, &source, &cancelled, &profile, &flag, |_| {
+        flag.store(true, Ordering::Relaxed)
+    });
+    assert!(result.is_err());
+    assert!(!cancelled.exists());
+    assert_eq!(std::fs::read_dir(folder.path()).unwrap().count(), 1);
 }

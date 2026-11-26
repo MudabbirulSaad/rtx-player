@@ -39,6 +39,7 @@ pub struct Snapshot {
     pub upscale: bool,
     pub rife_available: bool,
     pub rife_problem: Option<String>,
+    pub rife_export_available: bool,
     pub factor: f64,
     pub requested_factor: f64,
     pub adaptive: bool,
@@ -250,6 +251,10 @@ fn run(
     let mut display = rtx_player::display::for_window(surface).ok();
     let mut display_check = Instant::now();
     let available = rife.available();
+    let export_available = available
+        && runtime
+            .parent()
+            .is_some_and(|p| rtx_player::provider::verify_export_reader(p).is_ok());
     let mut last = Instant::now();
     let mut error = None;
     let mut streams = crate::tracks::Streams::default();
@@ -475,6 +480,7 @@ fn run(
                     .zip(number(c"osd-dimensions/mb"))
                     .map(|((h, t), b)| h - t - b),
                 rife_available: available,
+                rife_export_available: export_available,
                 rife_problem: rife.problem.clone(),
                 factor: rife.factor,
                 requested_factor: adaptive.requested,

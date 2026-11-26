@@ -1,0 +1,8 @@
+{
+  "source": "https://github.com/vapoursynth/bestsource/releases/download/R23/BestSource-R23-win64-clang-vs-only.zip",
+  "archive_bytes": 16098396,
+  "archive_sha256": "4958925e8c1bf8121637259c1383cf5c309e27d8c5710e6e3cd41e1e932a6982",
+  "member": "BestSource-R23-win64-clang-vs-only.dll",
+  "member_bytes": 37168640,
+  "member_sha256": "01e591f0e9b7f1f433ed90ffb09faf6baa23fc18dd35be175be28418401dd873"
+}

@@ -9,7 +9,7 @@ import tempfile
 import urllib.request
 import zipfile
 
-from scripts.fetch_runtime import verified_copy
+from scripts.fetch_runtime import install_member, verified_copy
 
 
 def extract_zip(archive, destination):
@@ -70,4 +70,15 @@ def install(executable):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("executable", type=Path)
-    print(install(parser.parse_args().executable))
+    parser.add_argument("--export-reader", action="store_true", help="add the finite video reader for RIFE export")
+    args = parser.parse_args()
+    if args.export_reader:
+        app = args.executable.resolve(strict=True).parent
+        if not (app / "providers/rife/librife.dll").is_file():
+            parser.error("Install the RIFE playback provider first")
+        folder = app / "providers/rife-export"
+        folder.mkdir(exist_ok=True)
+        manifest = json.loads((Path(__file__).resolve().parents[1] / "build/rife-reader.json").read_text())
+        print(install_member(manifest, folder / "bestsource.dll"))
+    else:
+        print(install(args.executable))

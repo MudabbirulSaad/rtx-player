@@ -3,13 +3,14 @@ import { invoke } from '@tauri-apps/api/core'
 
 type Job = {state:'idle'|'cancelled'} | {state:'complete'; encoder:string} | {state:'running'; fraction:number} | {state:'error'; message:string}
 
-export function ExportPanel({close}: {close:()=>void}) {
+export function ExportPanel({close,interpolationAvailable=false}: {close:()=>void;interpolationAvailable?:boolean}) {
   const [encoder,setEncoder] = useState('software')
   const [height,setHeight] = useState(0)
   const [quality,setQuality] = useState(22)
   const [denoise,setDenoise] = useState(false)
   const [anime,setAnime] = useState(false)
   const [hdr,setHdr] = useState(false)
+  const [fps,setFps] = useState(0)
   const [bitrate,setBitrate] = useState('')
   const [job,setJob] = useState<Job>({state:'idle'})
   const [pending,setPending] = useState(false)
@@ -31,7 +32,7 @@ export function ExportPanel({close}: {close:()=>void}) {
   async function start() {
     setPending(true)
     setError('')
-    try {await invoke('start_export',{options:{encoder,height:height || null,quality,denoise,anime,hdr,bitrate_kbps:bitrate?Number(bitrate):null}})}
+    try {await invoke('start_export',{options:{encoder,height:height || null,quality,denoise,anime,hdr,target_fps:fps || null,bitrate_kbps:bitrate?Number(bitrate):null}})}
     catch(e) {setError(String(e))}
     finally {setPending(false)}
   }
@@ -53,6 +54,10 @@ export function ExportPanel({close}: {close:()=>void}) {
       <label><input type="checkbox" checked={denoise} onChange={e=>setDenoise(e.target.checked)}/> Denoise</label>
       <label><input type="checkbox" checked={anime} onChange={e=>setAnime(e.target.checked)}/> Anime4K upscaling</label>
       <label><input type="checkbox" checked={hdr} onChange={e=>setHdr(e.target.checked)}/> Convert SDR to HDR (BT.2020/PQ)</label>
+      <label>Frame rate <select aria-label="Export frame rate" value={fps} disabled={!interpolationAvailable} onChange={e=>setFps(Number(e.target.value))}>
+        <option value={0}>Original FPS</option>{[48,60,72,96,120,144].map(n=><option key={n} value={n}>RIFE {n} fps</option>)}
+      </select></label>
+      {!interpolationAvailable&&<p>Frame interpolation requires SDR video, RIFE and the optional export reader.</p>}
     </fieldset>
     <div className="flex items-center gap-3">
       {busy ? <button onClick={()=>void invoke('cancel_export').catch(e=>setError(String(e)))}>Cancel export</button> :

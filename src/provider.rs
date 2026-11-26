@@ -39,6 +39,35 @@ fn matches_digest(path: &Path, expected: &str) -> bool {
         && format!("{:x}", hash.finalize()) == expected
 }
 
+pub fn verify_rife_export(directory: &Path) -> Result<(), String> {
+    verify_rife(directory)?;
+    verify_export_reader(directory)
+}
+
+pub fn verify_export_reader(directory: &Path) -> Result<(), String> {
+    let manifest: serde_json::Value =
+        serde_json::from_str(include_str!("../build/rife-reader.json"))
+            .expect("valid pinned export reader manifest");
+    let reader = directory.join("providers/rife-export/bestsource.dll");
+    if !matches_digest(
+        &reader,
+        manifest["member_sha256"].as_str().expect("reader digest"),
+    ) {
+        return Err(
+            "Install or restore the optional RIFE export reader with fetch_rife --export-reader."
+                .into(),
+        );
+    }
+    if std::fs::read(directory.join("filters/rife-export.vpy"))
+        .ok()
+        .as_deref()
+        != Some(include_bytes!("../assets/filters/rife-export.vpy"))
+    {
+        return Err("Restore the bundled RIFE export script.".into());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
