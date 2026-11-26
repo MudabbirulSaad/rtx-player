@@ -9,7 +9,7 @@ import './player.css'
 
 type Effects = { super_resolution: boolean; hdr: boolean }
 type Playback = TrackState & {
-  fullscreen:boolean
+  fullscreen:boolean; queue_size:number; queue_index:number
   title: string | null; position: number | null; duration: number | null
   source_fps: number | null; avsync: number | null; dropped: number | null
   rife_available: boolean; rife_export_available:boolean; rife_problem: string | null; factor: number; filtered_fps: number | null
@@ -21,7 +21,7 @@ type Playback = TrackState & {
   target_transfer: string | null; target_primaries: string | null; target_peak: number | null
   upscale: boolean; paused: boolean; volume: number; speed: number; decoder: string | null; error: string | null
 }
-type Command = TrackCommand | { kind: 'rtx'; value: Effects } | { kind: 'upscale'|'adaptive'; value: boolean } | { kind: 'toggle' | 'mute' } | { kind: 'volume' | 'seek' | 'speed' | 'interpolate' | 'processingScale'; value: number }
+type Command = TrackCommand | { kind: 'rtx'; value: Effects } | { kind: 'upscale'|'adaptive'; value: boolean } | { kind: 'toggle' | 'mute' | 'next' | 'previous' } | { kind: 'volume' | 'seek' | 'speed' | 'interpolate' | 'processingScale'; value: number }
 
 function clock(seconds: number) {
   const t = Math.floor(Math.max(0, seconds))
@@ -129,6 +129,8 @@ export function Player() {
         {state?.paused || !playing ? <Play/> : <Pause/>}</button>
       <button onClick={() => void request('open_media')} title="Open file (Ctrl+O)"><FolderOpen/>Open</button>
       <button onClick={()=>setLibrary(true)}>Library</button>
+      {state&&state.queue_size>1&&<><button aria-label="Previous in playlist" disabled={state.queue_index===0} onClick={()=>void transport({kind:'previous'})}>Previous</button>
+        <button aria-label="Next in playlist" disabled={state.queue_index+1>=state.queue_size} onClick={()=>void transport({kind:'next'})}>Next</button></>}
       <button disabled={!playing} onClick={()=>setTracks(true)}>Tracks</button>
       <button disabled={!playing} onClick={()=>setExporting(true)}>Export</button>
       <span className="error truncate" role="status" title={issue || state?.error || state?.adaptation || undefined}>{issue || state?.error || state?.adaptation}</span>

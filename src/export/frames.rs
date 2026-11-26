@@ -26,7 +26,7 @@ impl Frames {
             .env("PYTHONHOME", python)
             .env("RTX_EXPORT_SOURCE", source)
             .env("RTX_EXPORT_FPS", fps.to_string())
-            .args(["--container","y4m","--requests","4"])
+            .args(["--container", "y4m", "--requests", "4"])
             .arg(app.join("filters/rife-export.vpy"))
             .arg("-")
             .creation_flags(0x08000000)

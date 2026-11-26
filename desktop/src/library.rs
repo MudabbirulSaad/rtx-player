@@ -1,4 +1,6 @@
 //! Local history and transport preferences. Playback can run without a catalog.
+pub mod collections;
+pub mod previews;
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -39,10 +41,25 @@ impl Library {
                 INSERT INTO preferences(id) VALUES(1);
                 CREATE TABLE media(id INTEGER PRIMARY KEY,path TEXT UNIQUE NOT NULL,title TEXT NOT NULL,position REAL NOT NULL DEFAULT 0,duration REAL NOT NULL DEFAULT 0,visited INTEGER NOT NULL);
                 PRAGMA user_version=1;").map_err(|e|e.to_string())?,
-            1=>(),
+            1..=3=>(),
             _=>return Err("The local library was created by a newer version of RTX Player.".into())
         }
+        if version < 2 {
+            tx.execute_batch("CREATE TABLE collections(id INTEGER PRIMARY KEY, name TEXT NOT NULL, folder TEXT UNIQUE);
+                CREATE TABLE members(collection_id INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+                    ordinal INTEGER NOT NULL, path TEXT NOT NULL, title TEXT NOT NULL, bytes INTEGER NOT NULL,
+                    PRIMARY KEY(collection_id, path), UNIQUE(collection_id, ordinal));
+                PRAGMA user_version=2;").map_err(|e|e.to_string())?;
+        }
+        if version < 3 {
+            tx.execute_batch("CREATE TABLE previews(collection_id INTEGER NOT NULL,path TEXT NOT NULL,
+                bytes INTEGER NOT NULL,modified INTEGER NOT NULL,jpeg BLOB NOT NULL,accessed INTEGER NOT NULL,
+                PRIMARY KEY(collection_id,path),FOREIGN KEY(collection_id,path) REFERENCES members(collection_id,path) ON DELETE CASCADE);
+                PRAGMA user_version=3;").map_err(|e|e.to_string())?;
+        }
         tx.commit().map_err(|e| e.to_string())?;
+        db.pragma_update(None, "foreign_keys", true)
+            .map_err(|e| e.to_string())?;
         Ok(Self(Mutex::new(db)))
     }
 

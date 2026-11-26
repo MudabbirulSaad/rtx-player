@@ -30,6 +30,12 @@ select { background: #202528; font-variant-numeric: tabular-nums; }
 .library li { border-bottom:1px solid #364044; }
 .library li button { width:100%; min-height:44px; justify-content:flex-start; }
 .library li span { margin-left:auto; }
+.collection-items li { display:flex; align-items:center; gap:6px; }
+.collection-items li button { width:auto; }
+.collection-items li button:first-child { flex:1; min-width:0; height:auto; padding:8px; }
+.collection-items li strong { overflow-wrap:anywhere; }
+.library form { display:flex; align-items:center; flex-wrap:wrap; gap:10px; margin-block:12px; }
+.library input[type=search], .library form input { padding:6px; }
 .confirm { margin-top:14px; }
 .enhance fieldset { display:flex; flex-wrap:wrap; align-items:center; gap:12px; padding:12px 0 18px; border-top:1px solid #364044; }
 .enhance legend { padding-right:10px; font-weight:600; }

@@ -10,6 +10,8 @@ pub struct Snapshot {
     pub audio_id: Option<i64>,
     pub subtitle_id: Option<i64>,
     pub chapter: Option<i64>,
+    pub queue_size: u32,
+    pub queue_index: u32,
     pub audio_delay: f64,
     pub subtitle_delay: f64,
     pub fullscreen: bool,
@@ -55,6 +57,8 @@ pub struct Snapshot {
 #[derive(Deserialize)]
 #[serde(tag = "kind", content = "value", rename_all = "camelCase")]
 pub enum Control {
+    Next,
+    Previous,
     Adaptive(bool),
     AudioTrack(i64),
     SubtitleTrack(Option<i64>),
@@ -82,6 +86,8 @@ impl Control {
         surface: usize,
     ) -> Result<(), String> {
         match self {
+            Self::Next => p.command(&["playlist-next", "weak"]),
+            Self::Previous => p.command(&["playlist-prev", "weak"]),
             Self::Adaptive(_) => Ok(()),
             Self::AudioTrack(id) if id > 0 => p.command(&["set", "aid", &id.to_string()]),
             Self::SubtitleTrack(None) => p.command(&["set", "sid", "no"]),
@@ -145,7 +151,7 @@ impl Control {
 
 enum Request {
     Subtitle(PathBuf),
-    Open(PathBuf),
+    Open(Vec<PathBuf>),
     Control(Control),
 }
 
@@ -195,9 +201,22 @@ impl Engine {
         if !path.is_file() {
             return Err("Select a local media file.".into());
         }
-        self.send(Request::Open(
+        self.send(Request::Open(vec![
             path.canonicalize().map_err(|e| e.to_string())?,
-        ))
+        ]))
+    }
+
+    pub fn playlist(&self, files: Vec<PathBuf>) -> Result<(), String> {
+        if files.is_empty() {
+            return Err("This playlist is empty.".into());
+        }
+        if let Some(missing) = files.iter().find(|p| !p.is_absolute() || !p.is_file()) {
+            return Err(format!(
+                "Playlist file unavailable: {}",
+                missing.file_name().unwrap_or_default().to_string_lossy()
+            ));
+        }
+        self.send(Request::Open(files))
     }
 
     pub fn control(&self, command: Control) -> Result<(), String> {
@@ -296,7 +315,7 @@ fn run(
                     .and_then(|s| player.command(&["sub-add", s, "select"]))
                     .err();
             }
-            Ok(Request::Open(path)) => {
+            Ok(Request::Open(files)) => {
                 adaptive.reset(1.0);
                 if let Err(e) = save_progress() {
                     eprintln!("Save playback position: {e}")
@@ -307,7 +326,19 @@ fn run(
                 if rife.factor > 1.0 {
                     rife.set(&mut player, 1.0)?;
                 }
-                error = player.load(&path).err();
+                error = (|| {
+                    let (first, rest) = files.split_first().ok_or("Empty playlist")?;
+                    player.load(first)?;
+                    for path in rest {
+                        player.command(&[
+                            "loadfile",
+                            path.to_str().ok_or("Unsupported playlist path")?,
+                            "append",
+                        ])?;
+                    }
+                    Ok::<_, String>(())
+                })()
+                .err();
                 if error.is_none() {
                     error = player.command(&["set", "pause", "no"]).err();
                 }
@@ -349,6 +380,17 @@ fn run(
                 Ok(PlaybackEvent::Idle) => break,
                 Ok(PlaybackEvent::Shutdown) => return Ok(()),
                 Ok(PlaybackEvent::Loaded) => {
+                    adaptive.reset(1.0);
+                    if rtx.requested.any()
+                        && let Err(e) = rtx.clear(&mut player)
+                    {
+                        error = Some(e)
+                    }
+                    if rife.factor > 1.0
+                        && let Err(e) = rife.set(&mut player, 1.0)
+                    {
+                        error = Some(e)
+                    }
                     streams_dirty = true;
                     if let (Some(db), Some(path)) =
                         (library, player.property(c"path").map(PathBuf::from))
@@ -445,6 +487,14 @@ fn run(
                     .property(c"current-tracks/sub/id")
                     .and_then(|s| s.parse().ok()),
                 chapter: player.property(c"chapter").and_then(|s| s.parse().ok()),
+                queue_size: player
+                    .property(c"playlist-count")
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0),
+                queue_index: player
+                    .property(c"playlist-pos")
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0),
                 audio_delay: number(c"audio-delay").unwrap_or(0.0),
                 subtitle_delay: number(c"sub-delay").unwrap_or(0.0),
                 fullscreen: false,

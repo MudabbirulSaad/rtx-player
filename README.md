@@ -54,6 +54,8 @@ Choose Tracks to switch audio or subtitle streams, open an external subtitle fil
 
 Open Library and enable **Remember recent videos** to save playback positions on this computer. Search by title or select a recent video to continue watching. Clearing history removes the saved entries. Volume and playback speed are saved separately. The app normally stores its SQLite database in its local application data directory. An empty `portable.mode` file beside the executable directs the database to a `data` folder beside it.
 
+In **Folders and playlists**, add a folder to list videos directly inside it. Refresh rereads that folder. New playlist creates an ordered list of individually selected videos. Play all starts from the beginning, or choose an item to play from there. Previous and Next move within the queue. Preview generates a local thumbnail on demand. The preview cache is capped at 32 MiB and can be cleared from the collections view. Removing an entry affects only the library.
+
 ## Windows packages
 
 With the build prerequisites installed, run `python -m scripts.package_windows <new-output-directory>` from the checkout. The command builds the desktop app, a portable ZIP and a current-user NSIS installer. It writes SHA-256 checksums and includes a dependency inventory in both packages. Windows WebView2 is required. RIFE is a separate optional download.

@@ -30,6 +30,9 @@ fn transcode_and_cancel_real_media() {
     assert_eq!(last, 1.);
     assert!(std::fs::metadata(&dest).unwrap().len() > 1024);
     let ffmpeg = runtime.with_file_name("tools").join("export/ffmpeg.exe");
+    let thumbnail = rtx_player::export::thumbnail(runtime.parent().unwrap(), &source).unwrap();
+    assert!(thumbnail.starts_with(&[0xff, 0xd8]) && thumbnail.ends_with(&[0xff, 0xd9]));
+    assert!(thumbnail.len() > 1024 && thumbnail.len() <= 128 * 1024);
     assert_eq!(
         decoded_frames(&ffmpeg, &dest),
         decoded_frames(&ffmpeg, &source)

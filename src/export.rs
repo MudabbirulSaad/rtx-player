@@ -230,6 +230,54 @@ fn run_encoder(
     })
 }
 
+pub fn thumbnail(app: &Path, source: &Path) -> Result<Vec<u8>, String> {
+    let folder = tempfile::tempdir().map_err(|e| e.to_string())?;
+    let dest = folder.path().join("poster.jpg");
+    let mut command = Command::new(app.join("tools/export/ffmpeg.exe"));
+    command
+        .args([
+            "-nostdin",
+            "-v",
+            "error",
+            "-protocol_whitelist",
+            "file",
+            "-i",
+        ])
+        .arg(source)
+        .args([
+            "-map",
+            "0:V:0",
+            "-frames:v",
+            "1",
+            "-vf",
+            "thumbnail=8,scale=256:144:force_original_aspect_ratio=decrease",
+            "-c:v",
+            "mjpeg",
+            "-q:v",
+            "5",
+            "-an",
+            "-f",
+            "image2",
+        ])
+        .arg(&dest);
+    let timeout = AtomicBool::new(false);
+    let start = Instant::now();
+    run_encoder(command, Stdio::null(), &timeout, |_| {
+        timeout.store(start.elapsed() > Duration::from_secs(12), Ordering::Relaxed)
+    })
+    .map_err(|e| {
+        if timeout.load(Ordering::Relaxed) {
+            "Thumbnail generation timed out.".into()
+        } else {
+            e
+        }
+    })?;
+    if dest.metadata().map_err(|e| e.to_string())?.len() > 128 * 1024 {
+        return Err("Thumbnail exceeded its size limit.".into());
+    }
+    std::fs::read(dest).map_err(|e| e.to_string())
+}
+
 pub fn transcode(
     runtime: &Path,
     source: &Path,
