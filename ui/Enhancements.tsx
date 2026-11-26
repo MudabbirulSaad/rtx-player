@@ -1,9 +1,11 @@
 import {useEffect, useRef,useState} from 'react'
 import {ArrowLeft} from 'lucide-react'
 import {invoke} from '@tauri-apps/api/core'
+import {Picture,type PictureOptions} from './Picture'
 
 export type ProcessingInput={height:number|null;automatic:boolean;fps24:boolean}
 type Props = {
+  picture?:PictureOptions; changePicture:(options:PictureOptions)=>void
   input:ProcessingInput; changeInput:(input:ProcessingInput)=>void; sourceFps:number|null; displayFps:number|null
   close:()=>void; issue:(message:string)=>void
   playing:boolean; interpolationAvailable:boolean; hdrAvailable:boolean
@@ -79,6 +81,7 @@ export function Enhancements(props:Props) {
       {!props.hdrAvailable&&<span>Requires SDR video and an active Windows HDR display.</span>}
     </fieldset>
     {props.playing&&<section aria-label="Processing statistics"><h2>Playback statistics</h2><p>{props.timing}</p><p>{props.output}</p></section>}
+    {props.playing&&props.picture&&<Picture current={props.picture} apply={props.changePicture}/>}
     {gpu?.error&&<p>{gpu.error}</p>}
     {gpu?.devices.map((dev,i)=><section key={i} aria-label="GPU telemetry"><h2>{dev.name??`GPU ${i}`}</h2>
       <p>Driver {gpu.driver??'—'} · Compute capability {dev.compute??'—'}</p>

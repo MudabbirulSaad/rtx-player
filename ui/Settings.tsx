@@ -10,7 +10,7 @@ export const defaults:Options={software_decode:false,adaptive:false,scale:2,audi
 type Policy={kib:number;days:number}
 type Device={name:string;description:string}
 
-export function Settings({initial,devices,safe,rife,reader,close}:{initial:Options;devices:Device[];safe:boolean;rife:boolean;reader:boolean;close:()=>void}){
+export function Settings({initial,devices,safe,rife,reader,recovered,close}:{initial:Options;devices:Device[];safe:boolean;rife:boolean;reader:boolean;recovered:boolean;close:()=>void}){
   const [options,setOptions]=useState(initial)
   const [adapters,setAdapters]=useState<string[]>([])
   const [policy,setPolicy]=useState<Policy|null>(null)
@@ -53,6 +53,7 @@ export function Settings({initial,devices,safe,rife,reader,close}:{initial:Optio
   return <main className="library enhance" onKeyDown={e=>{if(e.key==='Escape')close()}}>
     <button ref={back} onClick={close}><ArrowLeft/>Back to player</button>
     <header><h1>Settings</h1></header>
+    {recovered&&<p role="status">Your original library database is damaged and has been preserved. New settings and library entries use library-recovery.sqlite3.</p>}
     {safe&&<p role="status">Safe mode is active. Playback uses software decoding and disables enhancements.</p>}
     <fieldset><legend>Playback defaults</legend>
       <label><input type="checkbox" checked={options.software_decode} onChange={e=>change('software_decode',e.target.checked)}/> Use software decoding</label>

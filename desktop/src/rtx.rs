@@ -14,6 +14,7 @@ impl Effects {
 }
 
 pub struct VideoProcessor {
+    pub picture: crate::picture::Picture,
     pub software_decode: bool,
     pub input: crate::input::ProcessingInput,
     pub requested: Effects,
@@ -24,6 +25,7 @@ pub struct VideoProcessor {
 impl Default for VideoProcessor {
     fn default() -> Self {
         Self {
+            picture: Default::default(),
             software_decode: false,
             input: Default::default(),
             requested: Effects::default(),

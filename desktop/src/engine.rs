@@ -4,8 +4,16 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
+pub struct Services {
+    pub journal: Arc<crate::diagnostics::Journal>,
+    pub gpus: Arc<Mutex<crate::gpu::GpuStats>>,
+}
+
 #[derive(Clone, Default, Serialize)]
 pub struct Snapshot {
+    pub renderer_adapter: Option<String>,
+    pub recovered_library: bool,
+    pub picture: crate::picture::Picture,
     pub input: crate::input::ProcessingInput,
     pub display_fps: Option<f64>,
     pub options: crate::settings::Options,
@@ -82,6 +90,7 @@ pub enum Control {
     Upscale(bool),
     Interpolate(f64),
     Input(crate::input::ProcessingInput),
+    Picture(crate::picture::Picture),
     Rtx(crate::rtx::Effects),
     ProcessingScale(f64),
 }
@@ -96,6 +105,14 @@ impl Control {
         surface: usize,
     ) -> Result<(), String> {
         match self {
+            Self::Picture(next) => {
+                if let Err(e) = next.apply(p) {
+                    rtx.picture.apply(p)?;
+                    return Err(e);
+                }
+                rtx.picture = next;
+                Ok(())
+            }
             Self::Next => p.command(&["playlist-next", "weak"]),
             Self::Previous => p.command(&["playlist-prev", "weak"]),
             Self::Adaptive(_) => Ok(()),
@@ -180,6 +197,7 @@ impl Control {
 }
 
 enum Request {
+    OpenFailed(String),
     Options(crate::settings::Options, mpsc::Sender<Result<(), String>>),
     Subtitle(PathBuf),
     Open(Vec<PathBuf>),
@@ -212,7 +230,7 @@ impl Engine {
         shader: PathBuf,
         initial: Option<PathBuf>,
         library: Option<Arc<crate::library::Library>>,
-        journal: Arc<crate::diagnostics::Journal>,
+        services: Services,
     ) -> Result<Self, String> {
         let (tx, rx) = mpsc::sync_channel(16);
         let snapshot = Arc::new(Mutex::new(Snapshot::default()));
@@ -227,14 +245,16 @@ impl Engine {
                     rx,
                     &shared,
                     library.as_deref(),
-                    &journal,
+                    &services,
                 );
                 if let Err(error) = result
                     && let Ok(mut s) = shared.lock()
                 {
                     s.phase = "error";
                     s.error = Some(error);
-                    journal.event("engine_stopped", serde_json::Value::Null);
+                    services
+                        .journal
+                        .event("engine_stopped", serde_json::Value::Null);
                 }
             })
             .map_err(|e| e.to_string())?;
@@ -242,8 +262,10 @@ impl Engine {
             worker: Mutex::new(Some(Worker { tx, thread })),
             snapshot,
         };
-        if let Some(file) = initial {
-            engine.open(file)?;
+        if let Some(file) = initial
+            && let Err(e) = engine.open(file)
+        {
+            engine.send(Request::OpenFailed(e))?;
         }
         Ok(engine)
     }
@@ -314,15 +336,17 @@ fn run(
     rx: mpsc::Receiver<Request>,
     shared: &Mutex<Snapshot>,
     library: Option<&crate::library::Library>,
-    journal: &crate::diagnostics::Journal,
+    services: &Services,
 ) -> Result<(), String> {
+    let journal = &services.journal;
     let saved_options = library.map(|db| db.options()).transpose();
     let mut options = saved_options
         .as_ref()
         .ok()
         .and_then(Clone::clone)
         .unwrap_or_default();
-    let adapter = if journal.safe {
+    let mut safe_mode = journal.safe;
+    let adapter = if safe_mode {
         None
     } else {
         options.adapter.as_deref()
@@ -335,16 +359,22 @@ fn run(
         }
     })?;
     let mut option_error = saved_options.err();
-    if let Err(e) = options.apply(&mut player, journal.safe, false) {
+    if library.is_some_and(|db| db.recovered()) {
+        option_error=Some("The library database is damaged. Its original file is preserved. New settings use library-recovery.sqlite3.".into());
+        journal.event("library_recovered", serde_json::Value::Null);
+    }
+    if let Err(e) = options.apply(&mut player, safe_mode, false) {
         option_error = Some(e);
         options = Default::default();
-        options.apply(&mut player, journal.safe, false)?;
+        options.apply(&mut player, safe_mode, false)?;
     }
-    if journal.safe {
+    if safe_mode {
         player.command(&["set", "hwdec", "no"])?;
+        player.command(&["set", "d3d11-warp", "yes"])?;
     }
+    let mut renderer_adapter = None;
     let app = runtime.parent().ok_or("Missing application directory")?;
-    let mut rife = if journal.safe {
+    let mut rife = if safe_mode {
         crate::rife::Rife::disabled(app)
     } else {
         crate::rife::Rife::new(app)
@@ -369,9 +399,9 @@ fn run(
     let mut streams = crate::tracks::Streams::default();
     let mut streams_dirty = true;
     let mut adaptive = crate::adaptive::Adaptive::default();
-    adaptive.enabled = options.adaptive && !journal.safe;
+    adaptive.enabled = options.adaptive && !safe_mode;
     rtx.scale = options.scale;
-    rtx.software_decode = journal.safe || options.software_decode;
+    rtx.software_decode = safe_mode || options.software_decode;
     adaptive.reset(1.0);
     let mut hdr10_swapchain = None;
     if let Some(db) = library {
@@ -401,6 +431,11 @@ fn run(
     };
     loop {
         match rx.recv_timeout(Duration::from_millis(25)) {
+            Ok(Request::OpenFailed(message)) => {
+                media_failed = true;
+                loading = false;
+                error = Some(message);
+            }
             Ok(Request::Options(next, reply)) => {
                 let result = (|| {
                     if next.audio_device != "auto"
@@ -413,20 +448,20 @@ fn run(
                     let db = library.ok_or("Local settings storage unavailable")?;
                     next.apply(
                         &mut player,
-                        journal.safe,
+                        safe_mode,
                         rife.factor > 1. || rtx.input != Default::default(),
                     )?;
                     rtx.set_scale(&mut player, next.scale, surface)?;
                     db.save_options(&next)?;
-                    adaptive.enabled = next.adaptive && !journal.safe;
-                    rtx.software_decode = journal.safe || next.software_decode;
+                    adaptive.enabled = next.adaptive && !safe_mode;
+                    rtx.software_decode = safe_mode || next.software_decode;
                     options = next;
                     Ok(())
                 })();
                 if result.is_err() {
                     let _ = options.apply(
                         &mut player,
-                        journal.safe,
+                        safe_mode,
                         rife.factor > 1. || rtx.input != Default::default(),
                     );
                     let _ = rtx.set_scale(&mut player, options.scale, surface);
@@ -469,7 +504,7 @@ fn run(
                 }
             }
             Ok(Request::Control(command)) => {
-                if journal.safe
+                if safe_mode
                     && matches!(
                         &command,
                         Control::Upscale(true)
@@ -564,6 +599,33 @@ fn run(
                     }
                 }
                 Ok(PlaybackEvent::StreamsChanged) => streams_dirty = true,
+                Ok(PlaybackEvent::Adapter(name)) => renderer_adapter = Some(name),
+                Ok(PlaybackEvent::VideoOutputFailed) => {
+                    loading = false;
+                    media_failed = true;
+                    if safe_mode {
+                        error=Some("The Direct3D software renderer could not open this video. Check the display connection and reopen the file.".into());
+                    } else {
+                        safe_mode = true;
+                        adaptive.enabled = false;
+                        rtx.software_decode = true;
+                        journal.event("renderer_recovery", serde_json::Value::Null);
+                        let recover = (|| {
+                            rtx.clear(&mut player)?;
+                            rife.set(&mut player, 1.)?;
+                            rife = crate::rife::Rife::disabled(app);
+                            rtx.input.change(&mut player, Default::default())?;
+                            player.command(&["change-list", "glsl-shaders", "clr", ""])?;
+                            player.command(&["set", "hwdec", "no"])?;
+                            player.command(&["set", "d3d11-warp", "yes"])?;
+                            player.command(&["playlist-play-index", "current"])
+                        })();
+                        error=Some(match recover {
+                            Ok(())=>"The Direct3D output failed. Retrying this video with Windows software rendering.".into(),
+                            Err(e)=>format!("Software renderer recovery failed. Reopen the video in safe mode. {e}"),
+                        });
+                    }
+                }
                 Ok(PlaybackEvent::SwapChain { hdr10 }) => hdr10_swapchain = Some(hdr10),
                 Ok(PlaybackEvent::SuperResolution) => {
                     rtx.accepted.super_resolution = rtx.requested.super_resolution
@@ -660,10 +722,13 @@ fn run(
                 device_check = Instant::now();
             }
             let state = Snapshot {
+                renderer_adapter: renderer_adapter.clone(),
+                recovered_library: library.is_some_and(|db| db.recovered()),
+                picture: rtx.picture.clone(),
                 options: options.clone(),
                 audio_devices: devices.clone(),
                 phase,
-                safe_mode: journal.safe,
+                safe_mode,
                 source_width: number(c"video-params/w"),
                 source_height: number(c"video-params/h"),
                 cache_seconds: number(c"demuxer-cache-duration"),
@@ -717,8 +782,8 @@ fn run(
                     .zip(number(c"osd-dimensions/mt"))
                     .zip(number(c"osd-dimensions/mb"))
                     .map(|((h, t), b)| h - t - b),
-                rife_available: available,
-                rife_export_available: export_available,
+                rife_available: available && !safe_mode,
+                rife_export_available: export_available && !safe_mode,
                 rife_problem: rife.problem.clone(),
                 factor: rife.factor,
                 requested_factor: adaptive.requested,
@@ -736,14 +801,26 @@ fn run(
                 decoder: player.property(c"hwdec-current"),
                 error: error.clone(),
             };
-            let change = adaptive.observe(
-                Instant::now(),
-                !state.paused,
-                state.position,
-                state.dropped,
-                state.avsync,
-                rife.factor,
-            );
+            let free_mib = renderer_adapter.as_ref().and_then(|name| {
+                let stats = services.gpus.try_lock().ok()?;
+                let device = stats
+                    .devices
+                    .iter()
+                    .find(|d| d.name.as_ref() == Some(name))?;
+                Some(device.total_memory?.saturating_sub(device.used_memory?) / 1048576)
+            });
+            let change = adaptive
+                .memory_budget(Instant::now(), phase == "playing", free_mib, rife.factor)
+                .or_else(|| {
+                    adaptive.observe(
+                        Instant::now(),
+                        !state.paused,
+                        state.position,
+                        state.dropped,
+                        state.avsync,
+                        rife.factor,
+                    )
+                });
             if phase != previous_phase
                 || (phase == "playing" && sampled.elapsed() > Duration::from_secs(10))
             {

@@ -7,6 +7,7 @@ mod export;
 mod gpu;
 mod input;
 mod library;
+mod picture;
 mod rife;
 mod rtx;
 mod settings;

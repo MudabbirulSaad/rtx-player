@@ -44,6 +44,7 @@ try{
     $raw=Get-Content -Raw -LiteralPath $report
     $doc=$raw|ConvertFrom-Json
     if(!$doc.playback.safe_mode -or $doc.playback.decoder -ne 'no' -or !$doc.recent_events.Count){throw 'Report does not verify safe-mode decoding'}
+    if($doc.playback.renderer_adapter -notlike '*Microsoft Basic Render Driver*'){throw "Unexpected WARP adapter: $($doc.playback.renderer_adapter)"}
     if($raw.Contains([IO.Path]::GetFileName($clip)) -or $raw.Contains($env:USERPROFILE.Replace('\','\\'))){throw 'Private media identifier in report'}
     Click 'Back to player'
     python "$PSScriptRoot/visible_playback.py" --pid $app.Id

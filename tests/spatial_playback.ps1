@@ -1,4 +1,4 @@
-param([Parameter(Mandatory)][string]$Player, [Parameter(Mandatory)][string]$Fixture)
+param([Parameter(Mandatory)][string]$Player, [Parameter(Mandatory)][string]$Fixture, [switch]$Brightness)
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient, System.Drawing
 Add-Type @"
@@ -60,18 +60,41 @@ try {
     $app.Refresh()
     $root = [Windows.Automation.AutomationElement]::FromHandle($app.MainWindowHandle)
     Invoke-Button 'Pause'
+    Invoke-Button 'Enhancements'
+    Start-Sleep -Milliseconds 350
+    Invoke-Button 'Back to player'
     Start-Sleep -Milliseconds 700
     $original = Capture
-    Invoke-Button 'Anime4K'
+    if($Brightness){
+        Invoke-Button 'Enhancements'
+        Start-Sleep -Milliseconds 350
+        $query=[Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::NameProperty,'Brightness')
+        $fields=$root.FindAll([Windows.Automation.TreeScope]::Descendants,$query)
+        $pattern=$null
+        foreach($field in $fields){
+            if($field.TryGetCurrentPattern([Windows.Automation.ValuePattern]::Pattern,[ref]$pattern)){$pattern.SetValue('30');break}
+            if($field.TryGetCurrentPattern([Windows.Automation.RangeValuePattern]::Pattern,[ref]$pattern)){$pattern.SetValue(30);break}
+        }
+        if(!$pattern){throw 'Brightness input has no writable value'}
+        Invoke-Button 'Apply picture adjustments'
+        Start-Sleep -Milliseconds 350
+        Invoke-Button 'Back to player'
+    }else{ Invoke-Button 'Anime4K' }
     Start-Sleep -Milliseconds 900
     $enhanced = Capture
-    Invoke-Button 'Anime4K'
+    if($Brightness){
+        Invoke-Button 'Enhancements'
+        Start-Sleep -Milliseconds 350
+        Invoke-Button 'Reset picture'
+        Start-Sleep -Milliseconds 350
+        Invoke-Button 'Back to player'
+    }else{ Invoke-Button 'Anime4K' }
     Start-Sleep -Milliseconds 900
     $restored = Capture
     $changed = Count-Changes $original $enhanced
     $residual = Count-Changes $original $restored
     if ($changed -lt 30 -or $residual -gt 5) { throw "Unexpected pixel counts: changed=$changed residual=$residual" }
-    "Paused frame: $changed changed samples with Anime4K, $residual after disabling it"
+    "Paused frame: $changed changed samples, $residual after restoring the original settings"
 } finally {
     foreach ($image in $original, $enhanced, $restored) { if ($image) { $image.Dispose() } }
     if (!$app.HasExited) {

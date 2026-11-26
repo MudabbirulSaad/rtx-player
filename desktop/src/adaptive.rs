@@ -10,6 +10,7 @@ pub struct Adaptive {
     previous: Option<(Instant, f64, f64)>,
     overloaded: Duration,
     last_change: Option<Instant>,
+    memory_since: Option<Instant>,
 }
 
 impl Adaptive {
@@ -18,7 +19,33 @@ impl Adaptive {
         self.previous = None;
         self.overloaded = Duration::ZERO;
         self.last_change = None;
+        self.memory_since = None;
         self.reason = None;
+    }
+    pub fn memory_budget(
+        &mut self,
+        now: Instant,
+        playing: bool,
+        free_mib: Option<u64>,
+        rate: f64,
+    ) -> Option<f64> {
+        if !self.enabled || !playing || rate <= 1. || free_mib.is_none_or(|free| free >= 512) {
+            self.memory_since = None;
+            return None;
+        }
+        if now.duration_since(*self.memory_since.get_or_insert(now)) < Duration::from_secs(3)
+            || self
+                .last_change
+                .is_some_and(|t| now.duration_since(t) < Duration::from_secs(8))
+        {
+            return None;
+        }
+        self.last_change = Some(now);
+        self.memory_since = None;
+        self.reason = Some(format!(
+            "RIFE {rate}× → original FPS after three seconds below 512 MiB of free GPU memory."
+        ));
+        Some(1.)
     }
     pub fn observe(
         &mut self,
@@ -85,6 +112,29 @@ impl Adaptive {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn handles_sustained_memory_pressure_on_the_active_adapter() {
+        let now = Instant::now();
+        let mut policy = Adaptive {
+            enabled: true,
+            ..Default::default()
+        };
+        for sec in 0..3 {
+            assert_eq!(
+                policy.memory_budget(now + Duration::from_secs(sec), true, Some(320), 4.),
+                None
+            );
+        }
+        assert_eq!(
+            policy.memory_budget(now + Duration::from_secs(3), true, Some(320), 4.),
+            Some(1.)
+        );
+        assert!(policy.reason.as_ref().unwrap().contains("memory"));
+        assert_eq!(
+            policy.memory_budget(now + Duration::from_secs(4), true, None, 4.),
+            None
+        );
+    }
     #[test]
     fn ignores_transients_and_steps_down_after_sustained_misses() {
         let start = Instant::now();

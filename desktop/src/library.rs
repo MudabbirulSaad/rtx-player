@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::State;
 
-pub struct Library(Mutex<Connection>);
+pub struct Library(Mutex<Connection>, bool);
 
 #[derive(Serialize)]
 pub struct Preferences {
@@ -26,6 +26,32 @@ pub struct Entry {
 }
 
 impl Library {
+    pub fn open_profile(path: &Path) -> Result<Self, String> {
+        let original = match Self::open(path) {
+            Ok(db) => return Ok(db),
+            Err(e) => e,
+        };
+        let check = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .and_then(|db| {
+                db.query_row("PRAGMA quick_check(1)", [], |row| row.get::<_, String>(0))
+            });
+        let damaged = match check {
+            Ok(reply) => reply != "ok",
+            Err(e) => matches!(
+                e.sqlite_error_code(),
+                Some(rusqlite::ErrorCode::DatabaseCorrupt | rusqlite::ErrorCode::NotADatabase)
+            ),
+        };
+        if !damaged {
+            return Err(original);
+        }
+        let mut recovered = Self::open(&path.with_file_name("library-recovery.sqlite3"))?;
+        recovered.1 = true;
+        Ok(recovered)
+    }
+    pub fn recovered(&self) -> bool {
+        self.1
+    }
     pub fn open(path: &Path) -> Result<Self, String> {
         let parent = path.parent().ok_or("Missing settings directory")?;
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -67,7 +93,7 @@ impl Library {
         tx.commit().map_err(|e| e.to_string())?;
         db.pragma_update(None, "foreign_keys", true)
             .map_err(|e| e.to_string())?;
-        Ok(Self(Mutex::new(db)))
+        Ok(Self(Mutex::new(db), false))
     }
 
     pub(crate) fn with<T>(
@@ -201,6 +227,25 @@ pub fn open_recent(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn corrupt_library_is_preserved_and_recovery_survives_reopen() {
+        let folder = tempfile::tempdir().unwrap();
+        let file = folder.path().join("library.sqlite3");
+        let original = b"damaged test fixture";
+        std::fs::write(&file, original).unwrap();
+        let db = Library::open_profile(&file).unwrap();
+        assert!(db.recovered());
+        db.preference(true, true).unwrap();
+        drop(db);
+        assert!(
+            Library::open_profile(&file)
+                .unwrap()
+                .preferences()
+                .unwrap()
+                .remember
+        );
+        assert_eq!(std::fs::read(file).unwrap(), original);
+    }
     #[test]
     fn history_is_opt_in_and_resume_survives_a_reopen() {
         let dir = tempfile::tempdir().unwrap();

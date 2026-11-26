@@ -152,7 +152,7 @@ pub fn metrics(s: &Snapshot) -> Value {
     json!({"phase":s.phase,"decoder":s.decoder,"source_fps":s.source_fps,"filter_fps":s.filtered_fps,
         "source_size":[s.source_width,s.source_height],"processing_input":s.input,"filter_size":[s.processed_width,s.processed_height],
         "video_area":[s.video_area_width,s.video_area_height],"drop_count":s.dropped,"av_offset_s":s.avsync,
-        "cache_s":s.cache_seconds,"rife_factor":s.factor,"anime4k_requested":s.upscale,
+        "cache_s":s.cache_seconds,"rife_factor":s.factor,"anime4k_requested":s.upscale,"renderer_adapter":s.renderer_adapter,
         "rtx_accepted":s.active_rtx,"hdr_display":s.display_hdr,"link_bits":s.display_bits,
         "hdr10_swapchain":s.hdr10_swapchain,"safe_mode":s.safe_mode})
 }

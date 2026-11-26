@@ -205,7 +205,7 @@ pub fn run() -> tauri::Result<()> {
             }));
             app.manage(Arc::clone(&journal));
             let library = profile
-                .and_then(|p| crate::library::Library::open(&p.join("library.sqlite3")))
+                .and_then(|p| crate::library::Library::open_profile(&p.join("library.sqlite3")))
                 .map(Arc::new);
             app.manage(crate::library::Catalog(library.clone()));
             app.manage(Engine::start(
@@ -220,7 +220,10 @@ pub fn run() -> tauri::Result<()> {
                     .find(|arg| arg != "--safe-mode")
                     .map(PathBuf::from),
                 library.ok(),
-                journal,
+                crate::engine::Services {
+                    journal,
+                    gpus: Arc::clone(&app.state::<crate::gpu::Gpus>().latest),
+                },
             )?);
             let host = window.clone();
             window.on_window_event(move |event| {

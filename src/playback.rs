@@ -276,6 +276,11 @@ impl Player {
                     // The runtime owns both strings until the next wait.
                     let prefix = CStr::from_ptr(msg.prefix).to_bytes();
                     let text = CStr::from_ptr(msg.text).to_string_lossy();
+                    if prefix == b"vo/gpu-next/d3d11"
+                        && let Some(adapter) = text.trim().strip_prefix("Device Name: ")
+                    {
+                        return Ok(PlaybackEvent::Adapter(adapter.chars().take(200).collect()));
+                    }
                     if prefix == b"vapoursynth"
                         && (text.contains("could not init VS")
                             || text.starts_with("Filter error at frame "))
@@ -313,6 +318,9 @@ impl Player {
                         .as_ref()
                         .ok_or("Missing end-file information")?;
                     if end.reason == 4 {
+                        if end.error == -15 {
+                            return Ok(PlaybackEvent::VideoOutputFailed);
+                        }
                         self.api.check(end.error, "Media playback failed")?;
                     }
                     Ok(if end.reason == 5 {
@@ -329,11 +337,12 @@ impl Player {
     pub fn play(&mut self, path: &Path) -> Result<(), String> {
         self.load(path)?;
         loop {
-            if matches!(
-                self.event(-1.0)?,
-                PlaybackEvent::Ended | PlaybackEvent::Shutdown
-            ) {
-                return Ok(());
+            match self.event(-1.0)? {
+                PlaybackEvent::Ended | PlaybackEvent::Shutdown => return Ok(()),
+                PlaybackEvent::VideoOutputFailed => {
+                    return Err("Windows video output could not initialize.".into());
+                }
+                _ => (),
             }
         }
     }
@@ -342,6 +351,8 @@ impl Player {
 pub enum PlaybackEvent {
     InterpolationFailed,
     StreamsChanged,
+    Adapter(String),
+    VideoOutputFailed,
     SwapChain { hdr10: bool },
     SuperResolution,
     VideoHdr,

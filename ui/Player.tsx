@@ -6,11 +6,14 @@ import { LibraryPanel } from './LibraryPanel'
 import { Enhancements,type ProcessingInput } from './Enhancements'
 import {Tracks, type TrackCommand,type TrackState} from './Tracks'
 import {Settings,type Options} from './Settings'
+import type {PictureOptions} from './Picture'
 import './player.css'
 
 type Effects = { super_resolution: boolean; hdr: boolean }
 type Playback = TrackState & {
   input:ProcessingInput; display_fps:number|null
+  picture:PictureOptions
+  recovered_library:boolean
   phase:string;safe_mode:boolean;options:Options;audio_devices:{name:string;description:string}[]
   fullscreen:boolean; queue_size:number; queue_index:number
   title: string | null; position: number | null; duration: number | null
@@ -24,7 +27,7 @@ type Playback = TrackState & {
   target_transfer: string | null; target_primaries: string | null; target_peak: number | null
   upscale: boolean; paused: boolean; volume: number; speed: number; decoder: string | null; error: string | null
 }
-type Command = TrackCommand | {kind:'input';value:ProcessingInput} | { kind: 'rtx'; value: Effects } | { kind: 'upscale'|'adaptive'; value: boolean } | { kind: 'toggle' | 'mute' | 'next' | 'previous' } | { kind: 'volume' | 'seek' | 'speed' | 'interpolate' | 'processingScale'; value: number }
+type Command = TrackCommand | {kind:'picture';value:PictureOptions}| {kind:'input';value:ProcessingInput} | { kind: 'rtx'; value: Effects } | { kind: 'upscale'|'adaptive'; value: boolean } | { kind: 'toggle' | 'mute' | 'next' | 'previous' } | { kind: 'volume' | 'seek' | 'speed' | 'interpolate' | 'processingScale'; value: number }
 
 function clock(seconds: number) {
   const t = Math.floor(Math.max(0, seconds))
@@ -119,9 +122,10 @@ export function Player() {
     ...(state.video_area_width && state.video_area_height ? [`Video area ${state.video_area_width}×${state.video_area_height}`] : []),
   ].join(' · ')
   if (library) return <LibraryPanel close={()=>setLibrary(false)}/>
-  if(settings && state?.phase)return <Settings close={()=>setSettings(false)} initial={state.options} devices={state.audio_devices} safe={state.safe_mode} rife={state.rife_available} reader={state.rife_export_available}/>
+  if(settings && state?.phase)return <Settings close={()=>setSettings(false)} initial={state.options} devices={state.audio_devices} safe={state.safe_mode} rife={state.rife_available} reader={state.rife_export_available} recovered={state.recovered_library}/>
   if(tracks&&state) return <Tracks state={state} close={()=>setTracks(false)} send={v=>void transport(v)} add={()=>void request('open_subtitle')} error={issue || state.error || ''}/>
   if (enhancements) return <Enhancements close={()=>setEnhancements(false)} issue={setIssue}
+    picture={state?.picture} changePicture={v=>void transport({kind:'picture',value:v})}
     input={state?.input??{height:null,automatic:false,fps24:false}} changeInput={v=>void transport({kind:'input',value:v})} sourceFps={state?.source_fps??null} displayFps={state?.display_fps??null}
     adaptive={Boolean(state?.adaptive)} requested={state?.requested_factor||1} reason={state?.adaptation??null} changeAdaptive={v=>void transport({kind:'adaptive',value:v})} error={issue||state?.error||''}
     playing={playing && !state?.safe_mode} interpolationAvailable={playing && Boolean(state?.rife_available) && sdrSource} providerProblem={state?.rife_problem} hdrAvailable={playing && !state?.safe_mode && sdrSource && Boolean(state?.display_hdr)}
