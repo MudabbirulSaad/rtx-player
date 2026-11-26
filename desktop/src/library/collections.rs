@@ -6,10 +6,7 @@ use std::path::{Path, PathBuf};
 use tauri::State;
 
 const MAX_ITEMS: usize = 5000;
-const EXTENSIONS: &[&str] = &[
-    "mp4", "m4v", "mkv", "webm", "mov", "avi", "mpg", "mpeg", "ts", "m2ts", "mts", "wmv", "flv",
-    "ogv", "vob", "mxf",
-];
+use rtx_player::media::EXTENSIONS;
 
 #[derive(Serialize)]
 pub struct Collection {

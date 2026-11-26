@@ -94,7 +94,12 @@ struct Media {
     levels: Option<String>,
 }
 
-fn inspect(runtime: &Path, path: &Path, cancel: &AtomicBool) -> Result<Media, String> {
+fn inspect(
+    runtime: &Path,
+    path: &Path,
+    container: &str,
+    cancel: &AtomicBool,
+) -> Result<Media, String> {
     let mut probe = Player::offline(
         runtime,
         &[
@@ -105,7 +110,7 @@ fn inspect(runtime: &Path, path: &Path, cancel: &AtomicBool) -> Result<Media, St
             (c"audio-display", "no"),
         ],
     )?;
-    probe.load(path)?;
+    probe.load_container(path, container, false)?;
     let start = Instant::now();
     while start.elapsed() < Duration::from_secs(15) {
         check_cancel(cancel)?;
@@ -231,6 +236,7 @@ fn run_encoder(
 }
 
 pub fn thumbnail(app: &Path, source: &Path) -> Result<Vec<u8>, String> {
+    let container = crate::media::demuxer(source)?;
     let folder = tempfile::tempdir().map_err(|e| e.to_string())?;
     let dest = folder.path().join("poster.jpg");
     let mut command = Command::new(app.join("tools/export/ffmpeg.exe"));
@@ -241,6 +247,8 @@ pub fn thumbnail(app: &Path, source: &Path) -> Result<Vec<u8>, String> {
             "error",
             "-protocol_whitelist",
             "file",
+            "-f",
+            container,
             "-i",
         ])
         .arg(source)
@@ -302,7 +310,8 @@ pub fn transcode(
         _ => return Err("Choose an MP4 or MKV output.".into()),
     };
     let source = source.canonicalize().map_err(|e| e.to_string())?;
-    let input = inspect(runtime, &source, cancel)?;
+    let container = crate::media::demuxer(&source)?;
+    let input = inspect(runtime, &source, container, cancel)?;
     if !matches!(
         input.gamma.as_str(),
         "bt.1886" | "srgb" | "gamma2.2" | "gamma2.4"
@@ -352,6 +361,8 @@ pub fn transcode(
                 "pipe:1",
                 "-protocol_whitelist",
                 "file",
+                "-f",
+                container,
                 "-i",
             ])
             .arg(&source);
@@ -493,7 +504,12 @@ pub fn transcode(
             encode(false)?
         }
     };
-    let output = inspect(runtime, &temporary, cancel)?;
+    let output = inspect(
+        runtime,
+        &temporary,
+        crate::media::demuxer(destination)?,
+        cancel,
+    )?;
     if (output.duration - input.duration).abs() > 0.25
         || output.height != height
         || (input.audio && !output.audio)

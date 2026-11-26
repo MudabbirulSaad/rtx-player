@@ -249,6 +249,7 @@ impl Engine {
     }
 
     pub fn open(&self, path: PathBuf) -> Result<(), String> {
+        rtx_player::media::demuxer(&path)?;
         if !path.is_file() {
             return Err("Select a local media file.".into());
         }
@@ -458,11 +459,7 @@ fn run(
                     let (first, rest) = files.split_first().ok_or("Empty playlist")?;
                     player.load(first)?;
                     for path in rest {
-                        player.command(&[
-                            "loadfile",
-                            path.to_str().ok_or("Unsupported playlist path")?,
-                            "append",
-                        ])?;
+                        player.load_container(path, rtx_player::media::demuxer(path)?, true)?;
                     }
                     Ok::<_, String>(())
                 })()

@@ -123,6 +123,8 @@ impl Player {
             (c"config", c"no"),
             (c"load-scripts", c"no"),
             (c"ytdl", c"no"),
+            (c"access-references", c"no"),
+            (c"autoload-files", c"no"),
         ] {
             // The handle is live and mpv copies each option before returning.
             let code =
@@ -192,9 +194,25 @@ impl Player {
     }
 
     pub fn load(&mut self, path: &Path) -> Result<(), String> {
+        self.load_container(path, crate::media::demuxer(path)?, false)
+    }
+    pub fn load_container(
+        &mut self,
+        path: &Path,
+        container: &str,
+        append: bool,
+    ) -> Result<(), String> {
+        let opts = if container == "matroska" {
+            "demuxer=mkv".into()
+        } else {
+            format!("demuxer=lavf,demuxer-lavf-format={container}")
+        };
         self.command(&[
             "loadfile",
             path.to_str().ok_or("Unsupported filename encoding")?,
+            if append { "append" } else { "replace" },
+            "-1",
+            &opts,
         ])
     }
 

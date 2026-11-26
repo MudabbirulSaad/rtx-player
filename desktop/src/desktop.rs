@@ -18,6 +18,7 @@ use windows_sys::Win32::{Foundation::POINT, Graphics::Gdi::ScreenToClient};
 async fn open_media(engine: State<'_, Engine>) -> Result<(), String> {
     if let Some(file) = rfd::AsyncFileDialog::new()
         .set_title("Open video")
+        .add_filter("Video files", rtx_player::media::EXTENSIONS)
         .pick_file()
         .await
     {
