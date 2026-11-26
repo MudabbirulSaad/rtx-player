@@ -8,6 +8,13 @@ pub struct Rife {
 }
 
 impl Rife {
+    pub fn disabled(directory: &Path) -> Self {
+        Self {
+            directory: directory.to_owned(),
+            factor: 1.0,
+            problem: Some("Safe mode disables interpolation.".into()),
+        }
+    }
     pub fn new(directory: &Path) -> Self {
         Self {
             directory: directory.to_owned(),

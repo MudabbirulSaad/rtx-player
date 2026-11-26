@@ -6,6 +6,13 @@ use std::time::{Duration, Instant};
 
 #[derive(Clone, Default, Serialize)]
 pub struct Snapshot {
+    pub options: crate::settings::Options,
+    pub audio_devices: Vec<crate::settings::Device>,
+    pub phase: &'static str,
+    pub safe_mode: bool,
+    pub source_width: Option<f64>,
+    pub source_height: Option<f64>,
+    pub cache_seconds: Option<f64>,
     pub streams: crate::tracks::Streams,
     pub audio_id: Option<i64>,
     pub subtitle_id: Option<i64>,
@@ -150,6 +157,7 @@ impl Control {
 }
 
 enum Request {
+    Options(crate::settings::Options, mpsc::Sender<Result<(), String>>),
     Subtitle(PathBuf),
     Open(Vec<PathBuf>),
     Control(Control),
@@ -166,12 +174,22 @@ pub struct Engine {
 }
 
 impl Engine {
+    pub fn options(
+        &self,
+        options: crate::settings::Options,
+    ) -> Result<mpsc::Receiver<Result<(), String>>, String> {
+        options.validate()?;
+        let (tx, rx) = mpsc::channel();
+        self.send(Request::Options(options, tx))?;
+        Ok(rx)
+    }
     pub fn start(
         runtime: PathBuf,
         surface: usize,
         shader: PathBuf,
         initial: Option<PathBuf>,
         library: Option<Arc<crate::library::Library>>,
+        journal: Arc<crate::diagnostics::Journal>,
     ) -> Result<Self, String> {
         let (tx, rx) = mpsc::sync_channel(16);
         let snapshot = Arc::new(Mutex::new(Snapshot::default()));
@@ -179,11 +197,21 @@ impl Engine {
         let thread = std::thread::Builder::new()
             .name("playback".into())
             .spawn(move || {
-                let result = run(runtime, surface, shader, rx, &shared, library.as_deref());
+                let result = run(
+                    runtime,
+                    surface,
+                    shader,
+                    rx,
+                    &shared,
+                    library.as_deref(),
+                    &journal,
+                );
                 if let Err(error) = result
                     && let Ok(mut s) = shared.lock()
                 {
+                    s.phase = "error";
                     s.error = Some(error);
+                    journal.event("engine_stopped", serde_json::Value::Null);
                 }
             })
             .map_err(|e| e.to_string())?;
@@ -262,9 +290,41 @@ fn run(
     rx: mpsc::Receiver<Request>,
     shared: &Mutex<Snapshot>,
     library: Option<&crate::library::Library>,
+    journal: &crate::diagnostics::Journal,
 ) -> Result<(), String> {
-    let mut player = Player::embedded(&runtime, surface)?;
-    let mut rife = crate::rife::Rife::new(runtime.parent().ok_or("Missing application directory")?);
+    let saved_options = library.map(|db| db.options()).transpose();
+    let mut options = saved_options
+        .as_ref()
+        .ok()
+        .and_then(Clone::clone)
+        .unwrap_or_default();
+    let adapter = if journal.safe {
+        None
+    } else {
+        options.adapter.as_deref()
+    };
+    let mut player = Player::embedded_on(&runtime, surface, adapter).or_else(|e| {
+        if adapter.is_some() {
+            Player::embedded(&runtime, surface)
+        } else {
+            Err(e)
+        }
+    })?;
+    let mut option_error = saved_options.err();
+    if let Err(e) = options.apply(&mut player, journal.safe, false) {
+        option_error = Some(e);
+        options = Default::default();
+        options.apply(&mut player, journal.safe, false)?;
+    }
+    if journal.safe {
+        player.command(&["set", "hwdec", "no"])?;
+    }
+    let app = runtime.parent().ok_or("Missing application directory")?;
+    let mut rife = if journal.safe {
+        crate::rife::Rife::disabled(app)
+    } else {
+        crate::rife::Rife::new(app)
+    };
     player.watch_video_processor()?;
     let mut rtx = crate::rtx::VideoProcessor::default();
     let mut display = rtx_player::display::for_window(surface).ok();
@@ -275,10 +335,18 @@ fn run(
             .parent()
             .is_some_and(|p| rtx_player::provider::verify_export_reader(p).is_ok());
     let mut last = Instant::now();
-    let mut error = None;
+    let mut error = option_error;
+    let mut devices = crate::settings::audio_devices(&player);
+    let mut device_check = Instant::now();
+    let mut loading = false;
+    let mut media_failed = false;
+    let mut previous_phase = "";
+    let mut sampled = Instant::now();
     let mut streams = crate::tracks::Streams::default();
     let mut streams_dirty = true;
     let mut adaptive = crate::adaptive::Adaptive::default();
+    adaptive.enabled = options.adaptive && !journal.safe;
+    rtx.scale = options.scale;
     adaptive.reset(1.0);
     let mut hdr10_swapchain = None;
     if let Some(db) = library {
@@ -308,6 +376,29 @@ fn run(
     };
     loop {
         match rx.recv_timeout(Duration::from_millis(25)) {
+            Ok(Request::Options(next, reply)) => {
+                let result = (|| {
+                    if next.audio_device != "auto"
+                        && !crate::settings::audio_devices(&player)
+                            .iter()
+                            .any(|d| d.name == next.audio_device)
+                    {
+                        return Err("The selected audio output is no longer available.".into());
+                    }
+                    let db = library.ok_or("Local settings storage unavailable")?;
+                    next.apply(&mut player, journal.safe, rife.factor > 1.)?;
+                    rtx.set_scale(&mut player, next.scale, surface)?;
+                    db.save_options(&next)?;
+                    adaptive.enabled = next.adaptive && !journal.safe;
+                    options = next;
+                    Ok(())
+                })();
+                if result.is_err() {
+                    let _ = options.apply(&mut player, journal.safe, rife.factor > 1.);
+                    let _ = rtx.set_scale(&mut player, options.scale, surface);
+                }
+                let _ = reply.send(result);
+            }
             Ok(Request::Subtitle(path)) => {
                 error = path
                     .to_str()
@@ -316,6 +407,8 @@ fn run(
                     .err();
             }
             Ok(Request::Open(files)) => {
+                loading = true;
+                media_failed = false;
                 adaptive.reset(1.0);
                 if let Err(e) = save_progress() {
                     eprintln!("Save playback position: {e}")
@@ -344,6 +437,15 @@ fn run(
                 }
             }
             Ok(Request::Control(command)) => {
+                if journal.safe
+                    && matches!(
+                        &command,
+                        Control::Upscale(true) | Control::Interpolate(_) | Control::Rtx(_)
+                    )
+                {
+                    error = Some("Safe mode disables video enhancement providers.".into());
+                    continue;
+                }
                 let new_rate = match &command {
                     Control::Adaptive(enabled) => {
                         adaptive.enabled = *enabled;
@@ -360,6 +462,9 @@ fn run(
                     && error.is_none()
                 {
                     adaptive.reset(rate);
+                    if options.software_decode {
+                        error = player.command(&["set", "hwdec", "no"]).err()
+                    }
                 }
                 if preference
                     && error.is_none()
@@ -380,6 +485,8 @@ fn run(
                 Ok(PlaybackEvent::Idle) => break,
                 Ok(PlaybackEvent::Shutdown) => return Ok(()),
                 Ok(PlaybackEvent::Loaded) => {
+                    loading = false;
+                    media_failed = false;
                     adaptive.reset(1.0);
                     if rtx.requested.any()
                         && let Err(e) = rtx.clear(&mut player)
@@ -390,6 +497,11 @@ fn run(
                         && let Err(e) = rife.set(&mut player, 1.0)
                     {
                         error = Some(e)
+                    }
+                    if (journal.safe || options.software_decode)
+                        && let Err(e) = player.command(&["set", "hwdec", "no"])
+                    {
+                        error = Some(e);
                     }
                     streams_dirty = true;
                     if let (Some(db), Some(path)) =
@@ -422,6 +534,10 @@ fn run(
                 }
                 Ok(PlaybackEvent::VideoHdr) => rtx.accepted.hdr = rtx.requested.hdr,
                 Ok(PlaybackEvent::InterpolationFailed) if rife.factor > 1.0 => {
+                    journal.event(
+                        "interpolation_failed",
+                        serde_json::json!({"factor":rife.factor}),
+                    );
                     let recovery = Control::Interpolate(1.0).apply(
                         &mut player,
                         &shader,
@@ -438,6 +554,10 @@ fn run(
                 }
                 Ok(PlaybackEvent::ExtensionFailed) => {
                     if rtx.requested.any() {
+                        journal.event(
+                            "driver_extension_failed",
+                            serde_json::json!({"requested":rtx.requested}),
+                        );
                         let restore = rtx.clear(&mut player);
                         error = Some(restore.err().unwrap_or_else(|| {
                             "The driver rejected RTX video processing. Original video restored."
@@ -447,6 +567,8 @@ fn run(
                 }
                 Ok(_) => (),
                 Err(message) => {
+                    loading = false;
+                    media_failed = true;
                     error = Some(message);
                     break;
                 }
@@ -478,7 +600,37 @@ fn run(
                     .and_then(|s| s.parse::<f64>().ok())
                     .filter(|v| v.is_finite())
             };
+            let paused = player.property(c"pause").as_deref() == Some("yes");
+            let position = number(c"time-pos");
+            let phase = if media_failed {
+                "error"
+            } else if loading {
+                "loading"
+            } else if player.property(c"eof-reached").as_deref() == Some("yes") {
+                "ended"
+            } else if player.property(c"seeking").as_deref() == Some("yes") {
+                "seeking"
+            } else if player.property(c"paused-for-cache").as_deref() == Some("yes") {
+                "buffering"
+            } else if position.is_none() {
+                "idle"
+            } else if paused {
+                "paused"
+            } else {
+                "playing"
+            };
+            if device_check.elapsed() > Duration::from_secs(8) {
+                devices = crate::settings::audio_devices(&player);
+                device_check = Instant::now();
+            }
             let state = Snapshot {
+                options: options.clone(),
+                audio_devices: devices.clone(),
+                phase,
+                safe_mode: journal.safe,
+                source_width: number(c"video-params/w"),
+                source_height: number(c"video-params/h"),
+                cache_seconds: number(c"demuxer-cache-duration"),
                 streams: streams.clone(),
                 audio_id: player
                     .property(c"current-tracks/audio/id")
@@ -503,9 +655,9 @@ fn run(
                     .map(PathBuf::from)
                     .filter(|p| p.is_absolute()),
                 title: player.property(c"media-title"),
-                position: number(c"time-pos"),
+                position,
                 duration: number(c"duration"),
-                paused: player.property(c"pause").as_deref() == Some("yes"),
+                paused,
                 volume: number(c"volume").unwrap_or(100.0),
                 speed: number(c"speed").unwrap_or(1.0),
                 display_hdr: display.as_ref().map(|s| s.hdr_active),
@@ -554,6 +706,13 @@ fn run(
                 state.avsync,
                 rife.factor,
             );
+            if phase != previous_phase
+                || (phase == "playing" && sampled.elapsed() > Duration::from_secs(10))
+            {
+                journal.event("playback", crate::diagnostics::metrics(&state));
+                sampled = Instant::now();
+                previous_phase = phase;
+            }
             *shared.lock().map_err(|_| "Playback state unavailable")? = state;
             if let Some(rate) = change
                 && let Err(e) = Control::Interpolate(rate).apply(

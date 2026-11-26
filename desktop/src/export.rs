@@ -60,7 +60,13 @@ pub struct Exports {
 }
 
 impl Exports {
-    fn start(&self, source: PathBuf, dest: PathBuf, options: Options) -> Result<(), String> {
+    fn start(
+        &self,
+        source: PathBuf,
+        dest: PathBuf,
+        options: Options,
+        journal: Arc<crate::diagnostics::Journal>,
+    ) -> Result<(), String> {
         let mut job = self.job.lock().map_err(|_| "Export worker unavailable")?;
         if job.as_ref().is_some_and(|j| !j.thread.is_finished()) {
             return Err("An export is already running.".into());
@@ -98,11 +104,18 @@ impl Exports {
         let thread = std::thread::Builder::new()
             .name("export".into())
             .spawn(move || {
+                journal.event("export_started",serde_json::json!({"hdr":profile.hdr,"anime4k":profile.anime,"target_fps":profile.target_fps}));
+                let mut last_progress=std::time::Instant::now();
                 let result = transcode(&runtime, &source, &dest, &profile, &flag, |fraction| {
+                    if last_progress.elapsed()>std::time::Duration::from_secs(10){
+                        journal.event("export_progress",serde_json::json!({"fraction":fraction}));
+                        last_progress=std::time::Instant::now();
+                    }
                     if let Ok(mut state) = status.lock() {
                         *state = Status::Running { fraction }
                     }
                 });
+                journal.event("export_finished",serde_json::json!({"saved":result.is_ok(),"cancelled":flag.load(Ordering::Relaxed),"encoder":result.as_ref().ok()}));
                 if let Ok(mut state) = status.lock() {
                     *state = match result {
                         Ok(encoder) => Status::Complete { encoder },
@@ -130,6 +143,7 @@ pub async fn start_export(
     engine: State<'_, crate::engine::Engine>,
     exports: State<'_, Exports>,
     options: Options,
+    journal: State<'_, Arc<crate::diagnostics::Journal>>,
 ) -> Result<(), String> {
     let source = engine
         .state()?
@@ -147,7 +161,12 @@ pub async fn start_export(
         .save_file()
         .await;
     if let Some(dest) = dest {
-        exports.start(source, dest.path().to_owned(), options)?;
+        exports.start(
+            source,
+            dest.path().to_owned(),
+            options,
+            Arc::clone(&journal),
+        )?;
     }
     Ok(())
 }

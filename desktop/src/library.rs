@@ -41,7 +41,7 @@ impl Library {
                 INSERT INTO preferences(id) VALUES(1);
                 CREATE TABLE media(id INTEGER PRIMARY KEY,path TEXT UNIQUE NOT NULL,title TEXT NOT NULL,position REAL NOT NULL DEFAULT 0,duration REAL NOT NULL DEFAULT 0,visited INTEGER NOT NULL);
                 PRAGMA user_version=1;").map_err(|e|e.to_string())?,
-            1..=3=>(),
+            1..=4=>(),
             _=>return Err("The local library was created by a newer version of RTX Player.".into())
         }
         if version < 2 {
@@ -57,13 +57,23 @@ impl Library {
                 PRIMARY KEY(collection_id,path),FOREIGN KEY(collection_id,path) REFERENCES members(collection_id,path) ON DELETE CASCADE);
                 PRAGMA user_version=3;").map_err(|e|e.to_string())?;
         }
+        if version < 4 {
+            tx.execute_batch(
+                "CREATE TABLE app_options(id INTEGER PRIMARY KEY CHECK(id=1),value TEXT NOT NULL);
+                INSERT INTO app_options VALUES(1,'{}'); PRAGMA user_version=4;",
+            )
+            .map_err(|e| e.to_string())?;
+        }
         tx.commit().map_err(|e| e.to_string())?;
         db.pragma_update(None, "foreign_keys", true)
             .map_err(|e| e.to_string())?;
         Ok(Self(Mutex::new(db)))
     }
 
-    fn with<T>(&self, read: impl FnOnce(&Connection) -> rusqlite::Result<T>) -> Result<T, String> {
+    pub(crate) fn with<T>(
+        &self,
+        read: impl FnOnce(&Connection) -> rusqlite::Result<T>,
+    ) -> Result<T, String> {
         let db = self.0.lock().map_err(|_| "Library unavailable")?;
         read(&db).map_err(|e| e.to_string())
     }

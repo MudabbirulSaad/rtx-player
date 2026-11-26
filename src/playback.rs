@@ -88,22 +88,31 @@ pub struct Player {
 
 impl Player {
     pub fn open(runtime: &Path) -> Result<Self, String> {
-        Self::create(runtime, None, None)
+        Self::create(runtime, None, None, None)
     }
 
     /// Attach to a live, application-owned child HWND on Windows.
     pub fn embedded(runtime: &Path, window: usize) -> Result<Self, String> {
-        Self::create(runtime, Some(window), None)
+        Self::create(runtime, Some(window), None, None)
+    }
+
+    pub fn embedded_on(
+        runtime: &Path,
+        window: usize,
+        adapter: Option<&str>,
+    ) -> Result<Self, String> {
+        Self::create(runtime, Some(window), None, adapter)
     }
 
     pub(crate) fn offline(runtime: &Path, options: &[(&CStr, &str)]) -> Result<Self, String> {
-        Self::create(runtime, None, Some(options))
+        Self::create(runtime, None, Some(options), None)
     }
 
     fn create(
         runtime: &Path,
         window: Option<usize>,
         offline: Option<&[(&CStr, &str)]>,
+        adapter: Option<&str>,
     ) -> Result<Self, String> {
         let api = Api::load(runtime)?;
         // The owned handle is destroyed before unloading the library, including on init failure.
@@ -142,6 +151,13 @@ impl Player {
             }
         }
         if let Some(window) = window {
+            if let Some(adapter) = adapter {
+                let value = CString::new(adapter).map_err(|_| "Invalid Direct3D adapter name")?;
+                let result = unsafe {
+                    (player.api.option)(handle.as_ptr(), c"d3d11-adapter".as_ptr(), value.as_ptr())
+                };
+                player.api.check(result, "Select Direct3D adapter")?;
+            }
             let wid = CString::new(window.to_string()).map_err(|e| e.to_string())?;
             for (key, value) in [
                 (c"wid", wid.as_c_str()),

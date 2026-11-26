@@ -56,6 +56,10 @@ Open Library and enable **Remember recent videos** to save playback positions on
 
 In **Folders and playlists**, add a folder to list videos directly inside it. Refresh rereads that folder. New playlist creates an ordered list of individually selected videos. Play all starts from the beginning, or choose an item to play from there. Previous and Next move within the queue. Preview generates a local thumbnail on demand. The preview cache is capped at 32 MiB and can be cleared from the collections view. Removing an entry affects only the library.
 
+Settings lets you choose a decoder, audio output, subtitles, appearance and keyboard seek interval. Save preferences to apply them. Selecting a Direct3D adapter takes effect on the next launch. To recover from startup problems, launch `rtx-player-desktop.exe --safe-mode`. Safe mode uses software decoding and disables optional video enhancements. Two interrupted exclusive sessions also trigger it automatically.
+
+Choose **Settings → Save diagnostic report** to save a local JSON file with the build revision, playback timing, renderer, GPU and recent recovery events. Media paths and titles are excluded. The event journal defaults to 256 KiB and seven days. Both limits are adjustable in Settings.
+
 ## Windows packages
 
 With the build prerequisites installed, run `python -m scripts.package_windows <new-output-directory>` from the checkout. The command builds the desktop app, a portable ZIP and a current-user NSIS installer. It writes SHA-256 checksums and includes a dependency inventory in both packages. Windows WebView2 is required. RIFE is a separate optional download.

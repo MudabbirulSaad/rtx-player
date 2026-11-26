@@ -43,3 +43,16 @@ select { background: #202528; font-variant-numeric: tabular-nums; }
 .enhance input[type=number] { width:5em; padding:4px 8px; border:1px solid #515a60; border-radius:4px; }
 .enhance button[aria-current=true] { background:#253b30; color:#b0edcd; }
 button[aria-pressed="true"] { color: #b0edcd; background: #253b30; }
+:root[data-theme="light"] { color-scheme:light; --surface:#f6f8f7; --text:#17221d; --secondary:#44564c; --field:#e3eae6; }
+@media (prefers-color-scheme:light) {
+  :root[data-theme="system"] { color-scheme:light; --surface:#f6f8f7; --text:#17221d; --secondary:#44564c; --field:#e3eae6; }
+}
+:root { background:var(--surface,#141719); color:var(--text,#eff3f5); }
+.library { background:var(--surface,#151a1c); }
+.library p,.library li span,.metrics,.time { color:var(--secondary,#c0c9ce); }
+select,button:hover,select:hover { background:var(--field,#252b2e); }
+@media(max-width:780px) {
+  .shell { padding-inline:10px; overflow-x:auto; }
+  .shell button,.shell select { flex-shrink:0; }
+  .shell .volume { width:45px; }
+}

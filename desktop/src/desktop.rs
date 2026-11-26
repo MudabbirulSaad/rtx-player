@@ -193,6 +193,15 @@ pub fn run() -> tauri::Result<()> {
             } else {
                 app.path().app_local_data_dir().map_err(|e| e.to_string())
             };
+            let safe = std::env::args_os().skip(1).any(|arg| arg == "--safe-mode");
+            let journal = crate::diagnostics::Journal::open(profile.as_deref().ok(), safe);
+            let crash = Arc::clone(&journal);
+            let previous = std::panic::take_hook();
+            std::panic::set_hook(Box::new(move |info| {
+                crash.event("panic", serde_json::Value::Null);
+                previous(info)
+            }));
+            app.manage(Arc::clone(&journal));
             let library = profile
                 .and_then(|p| crate::library::Library::open(&p.join("library.sqlite3")))
                 .map(Arc::new);
@@ -204,8 +213,12 @@ pub fn run() -> tauri::Result<()> {
                     "shaders/Anime4K/upscale-x2-s.glsl",
                     tauri::path::BaseDirectory::Resource,
                 )?,
-                std::env::args_os().nth(1).map(PathBuf::from),
+                std::env::args_os()
+                    .skip(1)
+                    .find(|arg| arg != "--safe-mode")
+                    .map(PathBuf::from),
                 library.ok(),
+                journal,
             )?);
             let host = window.clone();
             window.on_window_event(move |event| {
@@ -223,6 +236,7 @@ pub fn run() -> tauri::Result<()> {
                                 if let Some(export) = export {
                                     let _ = export.join();
                                 }
+                                app.state::<Arc<crate::diagnostics::Journal>>().clean();
                                 app.exit(0);
                             });
                         }
@@ -271,6 +285,10 @@ pub fn run() -> tauri::Result<()> {
             crate::export::start_export,
             crate::tracks::open_subtitle,
             crate::gpu::gpu_stats,
+            crate::diagnostics::export_diagnostics,
+            crate::diagnostics::diagnostic_policy,
+            crate::diagnostics::configure_diagnostics,
+            crate::settings::set_player_options,
             crate::export::export_status,
             crate::export::cancel_export,
             open_media,
