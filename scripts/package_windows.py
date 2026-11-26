@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import tempfile
 import tomllib
+import urllib.request
 import zipfile
 
 from scripts import fetch_export, fetch_runtime
@@ -45,6 +46,44 @@ def portable(path, files):
             info.compress_type = zipfile.ZIP_DEFLATED
             with archive.open(info,"w") as out, source.open("rb") as src:
                 shutil.copyfileobj(src,out)
+
+
+def dependency_notices(metadata, output):
+    packages=[(p["name"],p["version"],p.get("license"),Path(p["manifest_path"]).parent,
+               p.get("license_file")) for p in metadata["packages"] if p.get("source")]
+    for name,p in json.loads((ROOT/"package-lock.json").read_text())["packages"].items():
+        if name and not p.get("dev") and (ROOT/name).is_dir():
+            packages.append((name.rsplit("node_modules/",1)[-1],p.get("version",""),p.get("license"),ROOT/name,None))
+    with output.open("w",encoding="utf-8",newline="\n") as out:
+        for name,version,license_id,folder,declared_file in sorted(packages,key=lambda row:row[:2]):
+            out.write(f"\n{name} {version}\nDeclared licence: {license_id or 'see upstream distribution'}\n")
+            texts={p for p in folder.iterdir() if p.is_file() and
+                   p.name.upper().startswith(("LICENSE","LICENCE","COPYING","NOTICE","COPYRIGHT"))}
+            if declared_file and (folder/declared_file).is_file():
+                texts.add(folder/declared_file)
+            for file in sorted(texts,key=lambda f:f.name):
+                out.write(f"\n{file.name}\n{file.read_text(encoding='utf-8',errors='replace').rstrip()}\n")
+
+
+def installer_template(scratch, files):
+    # Tauri 2.12.6 enumerates resource directories from a hash set. Fix their order
+    # before NSIS assigns string-table offsets to the install and uninstall steps.
+    version=json.loads((ROOT/"node_modules/@tauri-apps/cli/package.json").read_text())["version"]
+    if version!="2.12.6": raise RuntimeError("Review the installer template after updating Tauri CLI")
+    url=f"https://raw.githubusercontent.com/tauri-apps/tauri/tauri-cli-v{version}/crates/tauri-bundler/src/bundle/windows/nsis/installer.nsi"
+    template=scratch/"installer.nsi"
+    with urllib.request.urlopen(url,timeout=30) as source:
+        fetch_runtime.verified_copy(source,template,34027,"d00089d3b1a2c4a30d7b6e098079100cb8f25e980f84d4515aca4597b95e967d")
+    content=template.read_text(encoding="utf-8")
+    directories={parent.as_posix() for name in files for parent in Path(name).parents if parent!=Path(".")}
+    for key,command,reverse in [("resources_dirs","CreateDirectory",False),("resources_ancestors","RMDir /REBOOTOK",True)]:
+        start=content.index("{{#each "+key+"}}")
+        end=content.index("{{/each}}",start)+len("{{/each}}")
+        order=sorted(directories,key=lambda d:(d.count("/"),d),reverse=reverse)
+        lines=[command+' "$INSTDIR\\'+name.replace("/","\\")+'"' for name in order]
+        content=content[:start]+"\n  ".join(lines)+content[end:]
+    template.write_text(content,encoding="utf-8")
+    return template
 
 
 def build(output):
@@ -89,6 +128,8 @@ def build(output):
                 if file.is_file(): files[f"{resource}/{file.name}"]=file
         (payload/"components.json").write_text(json.dumps(sbom(metadata),indent=2)+"\n",encoding="utf-8")
         files["components.json"]=payload/"components.json"
+        dependency_notices(metadata,payload/"DEPENDENCY-LICENSES.txt")
+        files["DEPENDENCY-LICENSES.txt"]=payload/"DEPENDENCY-LICENSES.txt"
         for name,file in files.items():
             if not file.is_file(): raise FileNotFoundError(file)
         # Use a separate staging tree so the bundler never copies over a source DLL.
@@ -103,7 +144,8 @@ def build(output):
         # Discard filesystem timestamps from generated installer entries.
         hooks=scratch/"timestamps.nsh"
         hooks.write_text("SetDateSave off\n",encoding="ascii")
-        config.write_text(json.dumps({"bundle":{"resources":resources,"windows":{"nsis":{"installerHooks":str(hooks)}}}}),encoding="utf-8")
+        template=installer_template(scratch,files)
+        config.write_text(json.dumps({"bundle":{"resources":resources,"windows":{"nsis":{"installerHooks":str(hooks),"template":str(template)}}}}),encoding="utf-8")
         cli=ROOT/"node_modules/@tauri-apps/cli/tauri.js"
         # Tauri stamps the input EXE. Give it its own copy and keep Cargo's output pristine.
         bundle_target=scratch/"bundle-target"

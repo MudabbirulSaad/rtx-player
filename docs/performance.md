@@ -52,3 +52,9 @@ The AV1 input also produced a visible image with the NVIDIA filter processing at
 In the experimental reconstruction test, a 1920 × 1080 AV1 source at 30 fps first produced 1280 × 720 at 24 fps. RIFE 6×, RTX scale 3× and RTX HDR then produced a 3840 × 2160 PQ filter output and moving pixels within the 942 × 530 video area. The filter reported 144 fps, while the player had accumulated 312 drops and 3399 ms of A/V drift. This configuration missed real-time playback. The Windows display link reported eight bits per channel and returned to its original SDR mode after the test.
 
 Use `scripts/presentmon_summary.py` to analyze a PresentMon trace and `tests/visible_cadence.py` to repeat the short screen-content measurement with a test-owned window.
+
+## Recovery and picture controls
+
+A local stress test alternated two synthetic MP4/MKV inputs through the native queue and sought to a specified time after each switch. All 48 switches and seeks completed, and visible motion resumed. Host-process private memory rose from 299 MiB initially to 346.4 MiB at switch 12 and 350.4 MiB at switch 48. This sample excludes GPU and WebView subprocess memory. A deliberately damaged test database kept its original SHA-256 while the application used a separate recovery database.
+
+On a paused SDR frame, setting brightness to 30 changed all 23,040 sampled pixels in the test rectangle. Resetting the picture controls restored every sampled pixel. In a separate safe-mode run the diagnostic report identified the Microsoft Basic Render Driver, software decoding and moving output at 392 sample locations.

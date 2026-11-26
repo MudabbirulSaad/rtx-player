@@ -4,6 +4,14 @@ RTX Player opens local video in a native Direct3D 11 surface on Windows x64. A s
 
 ## Build the desktop app
 
+To use a packaged build, extract the portable ZIP into a writable directory and launch `rtx-player-desktop.exe`, or run the current-user setup executable. Open a file with Ctrl+O. Baseline playback works immediately. Under Enhancements, enable effects individually and use Playback statistics to check the actual processing path.
+
+![Native Windows player paused on a generated motion pattern](docs/images/playback.png)
+
+[Hardware compatibility](docs/compatibility.md) · [Performance measurements](docs/performance.md) · [Architecture](docs/architecture.md) · [Local data and uninstall](docs/security.md) · [Development release notes](docs/release-notes.md)
+
+### From source
+
 Use Rust 1.91.1, Node.js with npm, Python 3.11 or newer, and Windows tar with 7z support. On Windows, Tauri requires WebView2. The desktop build has been exercised with the x86-64 Windows GNU LLVM Rust toolchain and LLVM-MinGW UCRT linker.
 
 ```powershell
@@ -29,6 +37,8 @@ python -m scripts.fetch_rife target/debug/rtx-player-desktop.exe
 ```
 
 Open an SDR video and choose a RIFE multiplier in the transport bar or under Enhancements. Use 2.5× for 24 to 60 fps. The provider uses copy-back decoding, detects scene cuts from luma differences, and divides the source frame durations. The statistics control shows estimated filter output FPS, dropped frames and A/V offset. Reopening a file resets interpolation. To remove the optional runtime, close the app and delete its providers/rife directory.
+
+![Processing input, interpolation and target frame-rate controls](docs/images/enhancements.png)
 
 Under Enhancements, enable **Reduce interpolation when playback falls behind** to step down after sustained frame drops or A/V drift. The player shows the reason for each reduction and offers a retry. Device utilization, memory, power and temperature appear when the NVIDIA driver supplies them. [Reference measurements and display timing](docs/performance.md)
 
