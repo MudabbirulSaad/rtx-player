@@ -119,7 +119,7 @@ export function Player() {
     ...(state.video_area_width && state.video_area_height ? [`Video area ${state.video_area_width}×${state.video_area_height}`] : []),
   ].join(' · ')
   if (library) return <LibraryPanel close={()=>setLibrary(false)}/>
-  if(settings && state?.phase)return <Settings close={()=>setSettings(false)} initial={state.options} devices={state.audio_devices} safe={state.safe_mode}/>
+  if(settings && state?.phase)return <Settings close={()=>setSettings(false)} initial={state.options} devices={state.audio_devices} safe={state.safe_mode} rife={state.rife_available} reader={state.rife_export_available}/>
   if(tracks&&state) return <Tracks state={state} close={()=>setTracks(false)} send={v=>void transport(v)} add={()=>void request('open_subtitle')} error={issue || state.error || ''}/>
   if (enhancements) return <Enhancements close={()=>setEnhancements(false)} issue={setIssue}
     input={state?.input??{height:null,automatic:false,fps24:false}} changeInput={v=>void transport({kind:'input',value:v})} sourceFps={state?.source_fps??null} displayFps={state?.display_fps??null}

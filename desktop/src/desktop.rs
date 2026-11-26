@@ -140,6 +140,7 @@ const SS_BLACKRECT: u32 = 4;
 pub fn run() -> tauri::Result<()> {
     tauri::Builder::default()
         .manage(Exports::default())
+        .manage(crate::setup::Setup::default())
         .setup(|app| {
             app.manage(crate::gpu::Gpus::start()?);
             let window = WindowBuilder::new(app, "player")
@@ -228,6 +229,7 @@ pub fn run() -> tauri::Result<()> {
                         if let Some(worker) = host.state::<Engine>().shutdown() {
                             let app = host.app_handle().clone();
                             let export = host.state::<Exports>().shutdown();
+                            let setup = host.state::<crate::setup::Setup>().shutdown();
                             // Pump window messages until libmpv releases the child surface.
                             std::thread::spawn(move || {
                                 if worker.join().is_err() {
@@ -235,6 +237,9 @@ pub fn run() -> tauri::Result<()> {
                                 }
                                 if let Some(export) = export {
                                     let _ = export.join();
+                                }
+                                if let Some(setup) = setup {
+                                    let _ = setup.join();
                                 }
                                 app.state::<Arc<crate::diagnostics::Journal>>().clean();
                                 app.exit(0);
@@ -289,6 +294,9 @@ pub fn run() -> tauri::Result<()> {
             crate::diagnostics::diagnostic_policy,
             crate::diagnostics::configure_diagnostics,
             crate::settings::set_player_options,
+            crate::setup::setup_provider,
+            crate::setup::provider_status,
+            crate::setup::cancel_provider,
             crate::export::export_status,
             crate::export::cancel_export,
             open_media,

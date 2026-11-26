@@ -10,6 +10,7 @@ mod library;
 mod rife;
 mod rtx;
 mod settings;
+mod setup;
 mod tracks;
 fn main() -> tauri::Result<()> {
     // Set the optional script runtime before Tauri or the playback worker starts.

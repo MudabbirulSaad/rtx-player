@@ -20,7 +20,9 @@ For the command-line player, use `cargo build --release --locked -p rtx-player`,
 
 ## Optional frame interpolation
 
-Close the desktop app and run the following command to add the NCNN/Vulkan RIFE provider to this build. It downloads a private copy of embedded CPython, the VapourSynth wheel, the Windows filter and the pinned RIFE v4.25-lite model. The installer verifies each download and refuses to replace an existing provider directory.
+Choose **Settings → Install RIFE for playback**. The player uses Windows curl and tar to download an app-local copy of embedded CPython, VapourSynth, the Windows filter and the pinned RIFE v4.25-lite model. The installer verifies each download and the staged runtime before activation. You can cancel setup while a download is running. Restart to load the provider. For interpolated export, select **Install BestSource for export** and restart again.
+
+For a development build you can also install the playback provider from the checkout.
 
 ```powershell
 python -m scripts.fetch_rife target/debug/rtx-player-desktop.exe

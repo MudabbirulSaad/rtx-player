@@ -12,6 +12,10 @@ pub fn verify_rife(directory: &Path) -> Result<(), String> {
     if script.as_deref() != Some(include_bytes!("../assets/filters/rife.vpy")) {
         return Err("The RIFE script is missing or damaged. Restore the application files.".into());
     }
+    verify_files(&root)
+}
+
+pub fn verify_files(root: &Path) -> Result<(), String> {
     for line in include_str!("../build/rife-installed.sha256").lines() {
         let (expected, name) = line.split_once("  ").expect("pinned digest and path");
         if !matches_digest(&root.join(name), expected) {
@@ -23,7 +27,7 @@ pub fn verify_rife(directory: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn matches_digest(path: &Path, expected: &str) -> bool {
+pub fn matches_digest(path: &Path, expected: &str) -> bool {
     let Ok(file) = std::fs::File::open(path) else {
         return false;
     };
