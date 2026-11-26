@@ -56,9 +56,13 @@ def build(output):
         return subprocess.check_output(["git","rev-parse","HEAD"],cwd=ROOT,text=True).strip()
     commit=revision()
     run(["npm.cmd","run","build"])
-    run(["cargo","build","--release","--locked","-p","rtx-player-desktop"])
     toolchain=subprocess.check_output(["rustc","-vV"],text=True)
     host=next(line.removeprefix("host: ") for line in toolchain.splitlines() if line.startswith("host: "))
+    epoch=subprocess.check_output(["git","show","-s","--format=%ct",commit],cwd=ROOT,text=True).strip()
+    build_env={**os.environ,"SOURCE_DATE_EPOCH":epoch}
+    linker_flag="/Brepro" if host.endswith("-msvc") else "-Wl,--no-insert-timestamp"
+    run(["cargo","rustc","--release","--locked","-p","rtx-player-desktop","--bin","rtx-player-desktop",
+         "--","-C","link-arg="+linker_flag,"--remap-path-prefix",str(ROOT)+"=."],env=build_env)
     metadata=json.loads(subprocess.check_output(["cargo","metadata","--format-version","1","--locked","--filter-platform",host],cwd=ROOT))
     binary=Path(metadata["target_directory"])/"release/rtx-player-desktop.exe"
     runtime=fetch_runtime.install(binary)
@@ -72,11 +76,14 @@ def build(output):
         payload.mkdir()
         files={"rtx-player-desktop.exe":binary,"libmpv-2.dll":runtime,"tools/export/ffmpeg.exe":encoder,
                "LICENSE":ROOT/"LICENSE","THIRD_PARTY_NOTICES.md":ROOT/"THIRD_PARTY_NOTICES.md",
-               "README.md":ROOT/"README.md","docs/performance.md":ROOT/"docs/performance.md",
+               "README.md":ROOT/"README.md",
                "WebView2Loader.dll":binary.with_name("WebView2Loader.dll")}
         if host=="x86_64-pc-windows-gnullvm":
             sysroot=Path(subprocess.check_output(["rustc","--print","sysroot"],text=True).strip())
             files["libunwind.dll"]=sysroot/"bin/libunwind.dll"
+        for doc in sorted((ROOT/"docs").rglob("*")):
+            if doc.is_file() and doc.suffix in {".md",".png"}:
+                files[doc.relative_to(ROOT).as_posix()]=doc
         for folder,resource in [(ROOT/"assets/Anime4K","shaders/Anime4K"),(ROOT/"assets/filters","filters")]:
             for file in folder.glob("*"):
                 if file.is_file(): files[f"{resource}/{file.name}"]=file
@@ -93,7 +100,10 @@ def build(output):
             if dest!=file: shutil.copyfile(file,dest)
             resources[str(dest)]=name
         config=scratch/"bundle.json"
-        config.write_text(json.dumps({"bundle":{"resources":resources}}),encoding="utf-8")
+        # Discard filesystem timestamps from generated installer entries.
+        hooks=scratch/"timestamps.nsh"
+        hooks.write_text("SetDateSave off\n",encoding="ascii")
+        config.write_text(json.dumps({"bundle":{"resources":resources,"windows":{"nsis":{"installerHooks":str(hooks)}}}}),encoding="utf-8")
         cli=ROOT/"node_modules/@tauri-apps/cli/tauri.js"
         # Tauri stamps the input EXE. Give it its own copy and keep Cargo's output pristine.
         bundle_target=scratch/"bundle-target"
@@ -101,7 +111,7 @@ def build(output):
         bundle_release.mkdir(parents=True)
         shutil.copy2(binary,bundle_release/binary.name)
         run(["node",str(cli),"bundle","--bundles","nsis","--config",str(config)],ROOT/"desktop",
-            env={**os.environ,"CARGO_TARGET_DIR":str(bundle_target)})
+            env={**build_env,"CARGO_TARGET_DIR":str(bundle_target)})
         built=bundle_release/"bundle/nsis"/f"RTX Player_{version}_x64-setup.exe"
         if not built.is_file(): raise FileNotFoundError(built)
         final=scratch/"artifacts"
