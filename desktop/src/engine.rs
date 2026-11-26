@@ -38,6 +38,7 @@ pub struct Snapshot {
     pub active_rtx: crate::rtx::Effects,
     pub upscale: bool,
     pub rife_available: bool,
+    pub rife_problem: Option<String>,
     pub factor: f64,
     pub requested_factor: f64,
     pub adaptive: bool,
@@ -373,6 +374,21 @@ fn run(
                     rtx.accepted.super_resolution = rtx.requested.super_resolution
                 }
                 Ok(PlaybackEvent::VideoHdr) => rtx.accepted.hdr = rtx.requested.hdr,
+                Ok(PlaybackEvent::InterpolationFailed) if rife.factor > 1.0 => {
+                    let recovery = Control::Interpolate(1.0).apply(
+                        &mut player,
+                        &shader,
+                        &mut rife,
+                        &mut rtx,
+                        surface,
+                    );
+                    error = Some(match recovery {
+                        Ok(()) => {
+                            "RIFE stopped processing frames. Interpolation was disabled.".into()
+                        }
+                        Err(e) => format!("RIFE stopped and playback recovery failed: {e}"),
+                    });
+                }
                 Ok(PlaybackEvent::ExtensionFailed) => {
                     if rtx.requested.any() {
                         let restore = rtx.clear(&mut player);
@@ -459,6 +475,7 @@ fn run(
                     .zip(number(c"osd-dimensions/mb"))
                     .map(|((h, t), b)| h - t - b),
                 rife_available: available,
+                rife_problem: rife.problem.clone(),
                 factor: rife.factor,
                 requested_factor: adaptive.requested,
                 adaptive: adaptive.enabled,

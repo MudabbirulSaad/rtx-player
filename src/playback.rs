@@ -242,6 +242,12 @@ impl Player {
                     // The runtime owns both strings until the next wait.
                     let prefix = CStr::from_ptr(msg.prefix).to_bytes();
                     let text = CStr::from_ptr(msg.text).to_string_lossy();
+                    if prefix == b"vapoursynth"
+                        && (text.contains("could not init VS")
+                            || text.starts_with("Filter error at frame "))
+                    {
+                        return Ok(PlaybackEvent::InterpolationFailed);
+                    }
                     if prefix == b"vo/gpu-next/libplacebo"
                         && text.contains("swap chain configuration")
                     {
@@ -300,6 +306,7 @@ impl Player {
 }
 
 pub enum PlaybackEvent {
+    InterpolationFailed,
     StreamsChanged,
     SwapChain { hdr10: bool },
     SuperResolution,

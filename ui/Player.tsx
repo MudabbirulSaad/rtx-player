@@ -12,7 +12,7 @@ type Playback = TrackState & {
   fullscreen:boolean
   title: string | null; position: number | null; duration: number | null
   source_fps: number | null; avsync: number | null; dropped: number | null
-  rife_available: boolean; factor: number; filtered_fps: number | null
+  rife_available: boolean; rife_problem: string | null; factor: number; filtered_fps: number | null
   requested_factor:number;adaptive:boolean;adaptation:string|null
   requested_rtx: Effects; active_rtx: Effects; display_hdr: boolean | null; display_bits: number | null; hdr10_swapchain: boolean | null
   processed_width: number | null; processed_height: number | null; processing_scale:number
@@ -108,7 +108,7 @@ export function Player() {
   if(tracks&&state) return <Tracks state={state} close={()=>setTracks(false)} send={v=>void transport(v)} add={()=>void request('open_subtitle')} error={issue || state.error || ''}/>
   if (enhancements) return <Enhancements close={()=>setEnhancements(false)} issue={setIssue}
     adaptive={Boolean(state?.adaptive)} requested={state?.requested_factor||1} reason={state?.adaptation??null} changeAdaptive={v=>void transport({kind:'adaptive',value:v})} error={issue||state?.error||''}
-    playing={playing} interpolationAvailable={playing && Boolean(state?.rife_available) && sdrSource} hdrAvailable={playing && sdrSource && Boolean(state?.display_hdr)}
+    playing={playing} interpolationAvailable={playing && Boolean(state?.rife_available) && sdrSource} providerProblem={state?.rife_problem} hdrAvailable={playing && sdrSource && Boolean(state?.display_hdr)}
     factor={state?.factor || 1} scale={state?.processing_scale || 2} shader={Boolean(state?.upscale)} vsr={Boolean(active?.super_resolution)} hdr={Boolean(active?.hdr)}
     rate={v=>void transport({kind:'interpolate',value:v})} resize={v=>void transport({kind:'processingScale',value:v})}
     anime={()=>void transport({kind:'upscale',value:!state?.upscale})} nvidia={()=>void transport({kind:'rtx',value:{...effects,super_resolution:!effects.super_resolution}})}

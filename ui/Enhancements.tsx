@@ -5,6 +5,7 @@ import {invoke} from '@tauri-apps/api/core'
 type Props = {
   close:()=>void; issue:(message:string)=>void
   playing:boolean; interpolationAvailable:boolean; hdrAvailable:boolean
+  providerProblem?:string|null
   factor:number; scale:number; shader:boolean; vsr:boolean; hdr:boolean
   rate:(value:number)=>void; resize:(value:number)=>void
   anime:()=>void; nvidia:()=>void; convert:()=>void
@@ -46,7 +47,7 @@ export function Enhancements(props:Props) {
       {[1,2,2.5,3,4,5,6].map(v=><label className="rate" key={v}><input type="radio" name="rife-rate"
         checked={props.factor===v} onChange={()=>props.rate(v)}/>{v===1?'Original FPS':`RIFE ${v}×`}</label>)}
     </fieldset>
-    {!props.interpolationAvailable&&<p>RIFE requires the optional provider and an SDR source.</p>}
+    {!props.interpolationAvailable&&<p>{props.providerProblem || 'RIFE requires an SDR source.'}</p>}
     <section className="library-options"><label><input type="checkbox" checked={props.adaptive} onChange={e=>props.changeAdaptive(e.target.checked)}/>Reduce interpolation when playback falls behind</label>
       {props.requested!==props.factor&&<button onClick={()=>props.rate(props.requested)}>Retry requested {props.requested}×</button>}
     </section>

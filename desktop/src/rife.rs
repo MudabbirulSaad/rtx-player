@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 pub struct Rife {
     directory: PathBuf,
+    pub problem: Option<String>,
     pub factor: f64,
 }
 
@@ -10,20 +11,13 @@ impl Rife {
     pub fn new(directory: &Path) -> Self {
         Self {
             directory: directory.to_owned(),
+            problem: rtx_player::provider::verify_rife(directory).err(),
             factor: 1.0,
         }
     }
 
     pub fn available(&self) -> bool {
-        [
-            "filters/rife.vpy",
-            "providers/rife/librife.dll",
-            "providers/rife/python/Lib/site-packages/vapoursynth/vsscript.dll",
-            "providers/rife/models/rife-v4.25-lite_ensembleFalse/flownet.param",
-            "providers/rife/models/rife-v4.25-lite_ensembleFalse/flownet.bin",
-        ]
-        .iter()
-        .all(|name| self.directory.join(name).is_file())
+        self.problem.is_none()
     }
 
     pub fn set(&mut self, player: &mut Player, factor: f64) -> Result<(), String> {
@@ -31,8 +25,8 @@ impl Rife {
             return Err("Choose a supported RIFE multiplier.".into());
         }
         if factor > 1.0 {
-            if !self.available() {
-                return Err("The optional RIFE provider is missing.".into());
+            if let Some(reason) = &self.problem {
+                return Err(reason.clone());
             }
             if !matches!(
                 player.property(c"video-params/gamma").as_deref(),
@@ -64,5 +58,27 @@ impl Rife {
         }
         self.factor = factor;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn incomplete_or_damaged_provider_does_not_enable_interpolation() {
+        let dir = tempfile::tempdir().unwrap();
+        for path in [
+            "filters/rife.vpy",
+            "providers/rife/librife.dll",
+            "providers/rife/python/Lib/site-packages/vapoursynth/vsscript.dll",
+            "providers/rife/models/rife-v4.25-lite_ensembleFalse/flownet.param",
+            "providers/rife/models/rife-v4.25-lite_ensembleFalse/flownet.bin",
+        ] {
+            let path = dir.path().join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, b"damaged").unwrap();
+        }
+        assert!(!Rife::new(dir.path()).available());
     }
 }
