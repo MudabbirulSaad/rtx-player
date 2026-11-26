@@ -6,6 +6,10 @@ rust-version = "1.91"
 license = "GPL-3.0-or-later"
 publish = false
 
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
 [dependencies]
 rtx-player = { path = ".." }
 tauri = { version = "=2.12.7", features = ["unstable"] }

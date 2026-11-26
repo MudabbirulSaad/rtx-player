@@ -99,11 +99,23 @@ def build(output):
     host=next(line.removeprefix("host: ") for line in toolchain.splitlines() if line.startswith("host: "))
     epoch=subprocess.check_output(["git","show","-s","--format=%ct",commit],cwd=ROOT,text=True).strip()
     build_env={**os.environ,"SOURCE_DATE_EPOCH":epoch}
+    metadata=json.loads(subprocess.check_output(["cargo","metadata","--format-version","1","--locked","--filter-platform",host],cwd=ROOT))
+    cargo_home=Path(os.environ.get("CARGO_HOME",Path.home()/".cargo")).resolve()
+    roots=[(ROOT,"/src"),(cargo_home,"/cargo"),(Path(metadata["target_directory"]),"/build")]
+    encoded=os.environ.get("CARGO_ENCODED_RUSTFLAGS")
+    flags=(encoded.split("\x1f") if encoded else os.environ.get("RUSTFLAGS","").split())
+    for original,stable in sorted(roots,key=lambda pair:len(str(pair[0]))):
+        flags.append(f"--remap-path-prefix={original}={stable}")
+    build_env["CARGO_ENCODED_RUSTFLAGS"]="\x1f".join(flags)
     linker_flag="/Brepro" if host.endswith("-msvc") else "-Wl,--no-insert-timestamp"
     run(["cargo","rustc","--release","--locked","-p","rtx-player-desktop","--bin","rtx-player-desktop",
-         "--","-C","link-arg="+linker_flag,"--remap-path-prefix",str(ROOT)+"=."],env=build_env)
-    metadata=json.loads(subprocess.check_output(["cargo","metadata","--format-version","1","--locked","--filter-platform",host],cwd=ROOT))
+         "--","-C","link-arg="+linker_flag],env=build_env)
     binary=Path(metadata["target_directory"])/"release/rtx-player-desktop.exe"
+    executable_bytes=binary.read_bytes().lower()
+    for path,_ in roots:
+        for name in {str(path),path.as_posix()}:
+            if any(name.lower().encode(encoding) in executable_bytes for encoding in ("utf-8","utf-16-le")):
+                raise RuntimeError("Release executable still contains a local build path")
     runtime=fetch_runtime.install(binary)
     encoder=fetch_export.install(binary)
     version=tomllib.loads((ROOT/"desktop/Cargo.toml").read_text())["package"]["version"]
