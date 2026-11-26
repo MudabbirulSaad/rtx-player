@@ -28,8 +28,11 @@ impl Rife {
     }
 
     pub fn set(&mut self, player: &mut Player, factor: f64) -> Result<(), String> {
-        if ![1.0, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0].contains(&factor) {
-            return Err("Choose a supported RIFE multiplier.".into());
+        if !(1.0..=6.0).contains(&factor) {
+            return Err(
+                "Choose a target from the processing frame rate through six times that rate."
+                    .into(),
+            );
         }
         if factor > 1.0 {
             if let Some(reason) = &self.problem {
@@ -49,9 +52,8 @@ impl Rife {
             self.factor = 1.0;
         }
         if factor == 1.0 {
-            return player.command(&["set", "hwdec", "auto-safe"]);
+            return Ok(());
         }
-        player.command(&["set", "hwdec", "auto-copy"])?;
         let script = self.directory.join("filters/rife.vpy");
         let script = script.to_str().ok_or("Unsupported provider path")?;
         let filter = format!(
@@ -59,10 +61,7 @@ impl Rife {
             script.len(),
             script
         );
-        if let Err(error) = player.command(&["vf", "add", &filter]) {
-            player.command(&["set", "hwdec", "auto-safe"])?;
-            return Err(error);
-        }
+        player.command(&["vf", "add", &filter])?;
         self.factor = factor;
         Ok(())
     }

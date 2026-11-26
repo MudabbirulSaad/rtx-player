@@ -32,6 +32,10 @@ Under Enhancements, enable **Reduce interpolation when playback falls behind** t
 
 The GNU LLVM toolchain may link libunwind.dll dynamically. Place the matching DLL from that toolchain beside the executable when running outside the build shell.
 
+**Processing input** starts at source resolution and cadence. Automatic resolution caps the processing input at 720p. You can select a height yourself or explicitly resample to 24 fps. For a 16:9 source, **Experimental 720p24 input**, RIFE 6× and RTX scale 3× request a 3840 × 2160, 144 fps pipeline. Enable RTX HDR on an active HDR display to request PQ output. The statistics distinguish filter dimensions from the visible video area. High requested rates can exceed the GPU's real-time capacity.
+
+Under **Target frame rate**, enter an FPS or copy the display refresh rate and choose **Apply target FPS**. The NCNN provider accepts temporal ratios up to 6×, including fractional ratios. The reported filter cadence and actual displayed cadence can differ.
+
 ## NVIDIA video processing
 
 RTX VSR requests spatial scaling from the NVIDIA D3D11 video processor. Select a scale from 1.5× to 4× under Enhancements. Selecting VSR turns off Anime4K. RTX HDR converts supported SDR sources on an active Windows HDR output. The app queries the display that contains its video window. On Windows versions without the advanced color mode query, the HDR conversion control is unavailable. Windows HDR mode remains under user control.

@@ -3,13 +3,14 @@ import { invoke } from '@tauri-apps/api/core'
 import { Activity, FolderOpen, Maximize, Pause, Play, Volume2 } from 'lucide-react'
 import { ExportPanel } from './ExportPanel'
 import { LibraryPanel } from './LibraryPanel'
-import { Enhancements } from './Enhancements'
+import { Enhancements,type ProcessingInput } from './Enhancements'
 import {Tracks, type TrackCommand,type TrackState} from './Tracks'
 import {Settings,type Options} from './Settings'
 import './player.css'
 
 type Effects = { super_resolution: boolean; hdr: boolean }
 type Playback = TrackState & {
+  input:ProcessingInput; display_fps:number|null
   phase:string;safe_mode:boolean;options:Options;audio_devices:{name:string;description:string}[]
   fullscreen:boolean; queue_size:number; queue_index:number
   title: string | null; position: number | null; duration: number | null
@@ -23,7 +24,7 @@ type Playback = TrackState & {
   target_transfer: string | null; target_primaries: string | null; target_peak: number | null
   upscale: boolean; paused: boolean; volume: number; speed: number; decoder: string | null; error: string | null
 }
-type Command = TrackCommand | { kind: 'rtx'; value: Effects } | { kind: 'upscale'|'adaptive'; value: boolean } | { kind: 'toggle' | 'mute' | 'next' | 'previous' } | { kind: 'volume' | 'seek' | 'speed' | 'interpolate' | 'processingScale'; value: number }
+type Command = TrackCommand | {kind:'input';value:ProcessingInput} | { kind: 'rtx'; value: Effects } | { kind: 'upscale'|'adaptive'; value: boolean } | { kind: 'toggle' | 'mute' | 'next' | 'previous' } | { kind: 'volume' | 'seek' | 'speed' | 'interpolate' | 'processingScale'; value: number }
 
 function clock(seconds: number) {
   const t = Math.floor(Math.max(0, seconds))
@@ -121,6 +122,7 @@ export function Player() {
   if(settings && state?.phase)return <Settings close={()=>setSettings(false)} initial={state.options} devices={state.audio_devices} safe={state.safe_mode}/>
   if(tracks&&state) return <Tracks state={state} close={()=>setTracks(false)} send={v=>void transport(v)} add={()=>void request('open_subtitle')} error={issue || state.error || ''}/>
   if (enhancements) return <Enhancements close={()=>setEnhancements(false)} issue={setIssue}
+    input={state?.input??{height:null,automatic:false,fps24:false}} changeInput={v=>void transport({kind:'input',value:v})} sourceFps={state?.source_fps??null} displayFps={state?.display_fps??null}
     adaptive={Boolean(state?.adaptive)} requested={state?.requested_factor||1} reason={state?.adaptation??null} changeAdaptive={v=>void transport({kind:'adaptive',value:v})} error={issue||state?.error||''}
     playing={playing && !state?.safe_mode} interpolationAvailable={playing && Boolean(state?.rife_available) && sdrSource} providerProblem={state?.rife_problem} hdrAvailable={playing && !state?.safe_mode && sdrSource && Boolean(state?.display_hdr)}
     factor={state?.factor || 1} scale={state?.processing_scale || 2} shader={Boolean(state?.upscale)} vsr={Boolean(active?.super_resolution)} hdr={Boolean(active?.hdr)}
@@ -169,6 +171,7 @@ export function Player() {
       <button aria-label="RTX Super Resolution" aria-pressed={Boolean(active?.super_resolution)} disabled={!playing || state?.safe_mode} title={`Apply ${state?.processing_scale || 2}× NVIDIA video super resolution`} onClick={() => void transport({kind:'rtx',value:{...effects,super_resolution:!effects.super_resolution}})}>RTX VSR</button>
       <button aria-pressed={Boolean(active?.hdr)} disabled={!playing || state?.safe_mode || (!effects.hdr && (!sdrSource || !state?.display_hdr))} title={hdrHint} onClick={() => void transport({kind:'rtx',value:{...effects,hdr:!effects.hdr}})}>RTX HDR</button>
       <select aria-label="Frame interpolation" disabled={!playing || !state?.rife_available || !sdrSource} title="RIFE interpolation requires the optional provider and SDR video" value={state?.factor || 1} onChange={e => void transport({kind:'interpolate',value:Number(e.target.value)})}>
+        {state && state.factor>1 && ![2,2.5,3,4,5,6].includes(state.factor) && <option value={state.factor}>RIFE {state.factor.toFixed(3)}×</option>}
         <option value={1}>Original FPS</option>{[2,2.5,3,4,5,6].map(n => <option key={n} value={n}>RIFE {n}×</option>)}
       </select>
       {stats && output && <span className="metrics truncate" title={output}>{output}</span>}

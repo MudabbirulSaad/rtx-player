@@ -49,4 +49,6 @@ The player displayed moving color at 392 screen sample points on each generated 
 
 The AV1 input also produced a visible image with the NVIDIA filter processing at 3840 × 2160.
 
+In the experimental reconstruction test, a 1920 × 1080 AV1 source at 30 fps first produced 1280 × 720 at 24 fps. RIFE 6×, RTX scale 3× and RTX HDR then produced a 3840 × 2160 PQ filter output and moving pixels within the 942 × 530 video area. The filter reported 144 fps, while the player had accumulated 312 drops and 3399 ms of A/V drift. This configuration missed real-time playback. The Windows display link reported eight bits per channel and returned to its original SDR mode after the test.
+
 Use `scripts/presentmon_summary.py` to analyze a PresentMon trace and `tests/visible_cadence.py` to repeat the short screen-content measurement with a test-owned window.

@@ -6,6 +6,8 @@ use std::time::{Duration, Instant};
 
 #[derive(Clone, Default, Serialize)]
 pub struct Snapshot {
+    pub input: crate::input::ProcessingInput,
+    pub display_fps: Option<f64>,
     pub options: crate::settings::Options,
     pub audio_devices: Vec<crate::settings::Device>,
     pub phase: &'static str,
@@ -79,6 +81,7 @@ pub enum Control {
     Mute,
     Upscale(bool),
     Interpolate(f64),
+    Input(crate::input::ProcessingInput),
     Rtx(crate::rtx::Effects),
     ProcessingScale(f64),
 }
@@ -106,12 +109,32 @@ impl Control {
             Self::SubtitleDelay(seconds) if (-60.0..=60.0).contains(&seconds) => {
                 p.command(&["set", "sub-delay", &seconds.to_string()])
             }
+            Self::Input(next) => {
+                let previous = rtx.input;
+                let effects = rtx.requested;
+                rtx.decoder(p, rife.factor, next)?;
+                if let Err(e) = rtx.input.change(p, next) {
+                    rtx.decoder(p, rife.factor, rtx.input)?;
+                    return Err(e);
+                }
+                if effects.any()
+                    && let Err(e) = rtx.set(p, effects, surface)
+                {
+                    rtx.input.change(p, previous)?;
+                    rtx.decoder(p, rife.factor, previous)?;
+                    rtx.set(p, effects, surface)?;
+                    return Err(e);
+                }
+                Ok(())
+            }
             Self::ProcessingScale(scale) => rtx.set_scale(p, scale, surface),
             Self::Rtx(settings) => rtx.set(p, settings, surface),
             Self::Interpolate(factor) => {
                 let previous = rtx.requested;
                 rtx.clear(p)?;
+                rtx.decoder(p, factor, rtx.input)?;
                 let changed = rife.set(p, factor);
+                rtx.decoder(p, rife.factor, rtx.input)?;
                 let restored = rtx.set(p, previous, surface);
                 changed.and(restored)
             }
@@ -347,6 +370,7 @@ fn run(
     let mut adaptive = crate::adaptive::Adaptive::default();
     adaptive.enabled = options.adaptive && !journal.safe;
     rtx.scale = options.scale;
+    rtx.software_decode = journal.safe || options.software_decode;
     adaptive.reset(1.0);
     let mut hdr10_swapchain = None;
     if let Some(db) = library {
@@ -386,15 +410,24 @@ fn run(
                         return Err("The selected audio output is no longer available.".into());
                     }
                     let db = library.ok_or("Local settings storage unavailable")?;
-                    next.apply(&mut player, journal.safe, rife.factor > 1.)?;
+                    next.apply(
+                        &mut player,
+                        journal.safe,
+                        rife.factor > 1. || rtx.input != Default::default(),
+                    )?;
                     rtx.set_scale(&mut player, next.scale, surface)?;
                     db.save_options(&next)?;
                     adaptive.enabled = next.adaptive && !journal.safe;
+                    rtx.software_decode = journal.safe || next.software_decode;
                     options = next;
                     Ok(())
                 })();
                 if result.is_err() {
-                    let _ = options.apply(&mut player, journal.safe, rife.factor > 1.);
+                    let _ = options.apply(
+                        &mut player,
+                        journal.safe,
+                        rife.factor > 1. || rtx.input != Default::default(),
+                    );
                     let _ = rtx.set_scale(&mut player, options.scale, surface);
                 }
                 let _ = reply.send(result);
@@ -419,6 +452,8 @@ fn run(
                 if rife.factor > 1.0 {
                     rife.set(&mut player, 1.0)?;
                 }
+                rtx.input.change(&mut player, Default::default())?;
+                rtx.decoder(&mut player, 1., Default::default())?;
                 error = (|| {
                     let (first, rest) = files.split_first().ok_or("Empty playlist")?;
                     player.load(first)?;
@@ -440,7 +475,10 @@ fn run(
                 if journal.safe
                     && matches!(
                         &command,
-                        Control::Upscale(true) | Control::Interpolate(_) | Control::Rtx(_)
+                        Control::Upscale(true)
+                            | Control::Interpolate(_)
+                            | Control::Rtx(_)
+                            | Control::Input(_)
                     )
                 {
                     error = Some("Safe mode disables video enhancement providers.".into());
@@ -485,6 +523,9 @@ fn run(
                 Ok(PlaybackEvent::Idle) => break,
                 Ok(PlaybackEvent::Shutdown) => return Ok(()),
                 Ok(PlaybackEvent::Loaded) => {
+                    if let Err(e) = rtx.input.change(&mut player, Default::default()) {
+                        error = Some(e);
+                    }
                     loading = false;
                     media_failed = false;
                     adaptive.reset(1.0);
@@ -498,9 +539,7 @@ fn run(
                     {
                         error = Some(e)
                     }
-                    if (journal.safe || options.software_decode)
-                        && let Err(e) = player.command(&["set", "hwdec", "no"])
-                    {
+                    if let Err(e) = rtx.decoder(&mut player, rife.factor, rtx.input) {
                         error = Some(e);
                     }
                     streams_dirty = true;
@@ -689,6 +728,8 @@ fn run(
                 adaptive: adaptive.enabled,
                 adaptation: adaptive.reason.clone(),
                 source_fps: number(c"container-fps"),
+                input: rtx.input,
+                display_fps: number(c"display-fps"),
                 avsync: number(c"avsync"),
                 dropped: number(c"frame-drop-count"),
                 filtered_fps: number(c"estimated-vf-fps"),

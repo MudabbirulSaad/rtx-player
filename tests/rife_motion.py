@@ -56,6 +56,14 @@ def verify(script):
         assert Fraction(frame.props["_DurationNum"],frame.props["_DurationDen"]) == Fraction(1,60)
         assert abs(center(frame) - (a + 1.6*i)) < 0.8
     print("24 to 60 fps: six correctly timed motion samples")
+    runpy.run_path(str(script), init_globals={"video_in": original, "user_data": "1.25"})
+    custom = vs.get_output(0)[0]
+    assert custom.fps == 30 and custom.num_frames == 20
+    for i in range(4):
+        frame = custom.get_frame(i)
+        assert Fraction(frame.props["_DurationNum"],frame.props["_DurationDen"]) == Fraction(1,30)
+        assert abs(center(frame) - (a + 3.2*i)) < 0.8
+    print("24 to 30 fps: four correctly timed motion samples")
 
 
 if __name__ == "__main__":

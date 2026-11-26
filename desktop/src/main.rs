@@ -5,6 +5,7 @@ mod diagnostics;
 mod engine;
 mod export;
 mod gpu;
+mod input;
 mod library;
 mod rife;
 mod rtx;

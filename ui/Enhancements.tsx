@@ -2,7 +2,9 @@ import {useEffect, useRef,useState} from 'react'
 import {ArrowLeft} from 'lucide-react'
 import {invoke} from '@tauri-apps/api/core'
 
+export type ProcessingInput={height:number|null;automatic:boolean;fps24:boolean}
 type Props = {
+  input:ProcessingInput; changeInput:(input:ProcessingInput)=>void; sourceFps:number|null; displayFps:number|null
   close:()=>void; issue:(message:string)=>void
   playing:boolean; interpolationAvailable:boolean; hdrAvailable:boolean
   providerProblem?:string|null
@@ -17,6 +19,10 @@ type GPU={name:string|null;compute:string|null;gpu_percent:number|null;used_memo
 export function Enhancements(props:Props) {
   const back=useRef<HTMLButtonElement>(null)
   const [gpu,setGpu]=useState<{devices:GPU[];driver:string|null;error:string|null}|null>(null)
+  const [target,setTarget]=useState('60')
+  const inputFps = props.input.fps24 ? 24 : props.sourceFps
+  const requested = Number(target)
+  const validTarget = Boolean(inputFps && requested > inputFps && requested <= inputFps*6 && requested <= 360)
   useEffect(()=>{
     let active=true
     let timer:ReturnType<typeof setTimeout>
@@ -35,6 +41,15 @@ export function Enhancements(props:Props) {
   return <main className="library enhance" onKeyDown={e=>{if(e.key==='Escape')props.close()}}>
     <button ref={back} onClick={props.close}><ArrowLeft/>Back to player</button>
     <header><h1>Video enhancements</h1></header>
+    <fieldset disabled={!props.playing}><legend>Processing input</legend>
+      <label>Resolution <select aria-label="Processing resolution" value={props.input.automatic?'auto':props.input.height??'source'}
+        onChange={e=>props.changeInput({...props.input,automatic:e.target.value==='auto',height:Number(e.target.value)||null})}>
+        <option value="source">Source resolution</option><option value="auto">Automatic · up to 720p</option>
+        {[480,720,1080,1440,2160].map(h=><option key={h} value={h}>{h}p</option>)}</select></label>
+      <label><input type="checkbox" checked={props.input.fps24} onChange={e=>props.changeInput({...props.input,fps24:e.target.checked})}/> Use 24 fps as processing input</label>
+      <button onClick={()=>props.changeInput({height:720,automatic:false,fps24:true})}>Experimental 720p24 input</button>
+      {props.input.height===720&&props.input.fps24&&<p>For 16:9 reconstruction towards 4K144, choose 3× RTX scale, RTX Super Resolution and 6× RIFE. RTX HDR requires an active HDR display.</p>}
+    </fieldset>
     <fieldset disabled={!props.playing}><legend>Spatial processing</legend>
       <button aria-pressed={props.shader} onClick={props.anime}>Anime4K</button>
       <button aria-pressed={props.vsr} onClick={props.nvidia}>RTX Super Resolution</button>
@@ -48,6 +63,13 @@ export function Enhancements(props:Props) {
         checked={props.factor===v} onChange={()=>props.rate(v)}/>{v===1?'Original FPS':`RIFE ${v}×`}</label>)}
     </fieldset>
     {!props.interpolationAvailable&&<p>{props.providerProblem || 'RIFE requires an SDR source.'}</p>}
+    <fieldset disabled={!props.interpolationAvailable}><legend>Target frame rate</legend>
+      <label>FPS <input type="number" list="target-fps" min="1" max="360" step="any" value={target} onChange={e=>setTarget(e.target.value)}/></label>
+      <datalist id="target-fps">{[30,48,59.94,60,72,90,96,100,120,144,165,240].map(v=><option key={v} value={v}/>)}</datalist>
+      <button disabled={!validTarget} onClick={()=>{if(inputFps)props.rate(requested/inputFps)}}>Apply target FPS</button>
+      <button disabled={!props.displayFps} onClick={()=>setTarget(String(props.displayFps))}>Use display refresh rate</button>
+      <p>{inputFps ? `Choose a target above ${inputFps.toFixed(2)} and up to ${Math.min(inputFps*6,360).toFixed(2)} fps.` : 'Source frame rate unavailable.'}</p>
+    </fieldset>
     <section className="library-options"><label><input type="checkbox" checked={props.adaptive} onChange={e=>props.changeAdaptive(e.target.checked)}/>Reduce interpolation when playback falls behind</label>
       {props.requested!==props.factor&&<button onClick={()=>props.rate(props.requested)}>Retry requested {props.requested}×</button>}
     </section>

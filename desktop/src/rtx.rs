@@ -14,6 +14,8 @@ impl Effects {
 }
 
 pub struct VideoProcessor {
+    pub software_decode: bool,
+    pub input: crate::input::ProcessingInput,
     pub requested: Effects,
     pub accepted: Effects,
     pub scale: f64,
@@ -22,6 +24,8 @@ pub struct VideoProcessor {
 impl Default for VideoProcessor {
     fn default() -> Self {
         Self {
+            software_decode: false,
+            input: Default::default(),
             requested: Effects::default(),
             accepted: Effects::default(),
             scale: 2.0,
@@ -30,6 +34,24 @@ impl Default for VideoProcessor {
 }
 
 impl VideoProcessor {
+    pub fn decoder(
+        &self,
+        p: &mut Player,
+        factor: f64,
+        input: crate::input::ProcessingInput,
+    ) -> Result<(), String> {
+        let mode = if self.software_decode {
+            "no"
+        } else if factor > 1. || input != Default::default() {
+            "auto-copy"
+        } else {
+            "auto-safe"
+        };
+        if p.property(c"hwdec").as_deref() == Some(mode) {
+            return Ok(());
+        }
+        p.command(&["set", "hwdec", mode])
+    }
     pub fn set_scale(&mut self, p: &mut Player, scale: f64, surface: usize) -> Result<(), String> {
         if ![1.5, 2.0, 3.0, 4.0].contains(&scale) {
             return Err("Choose a supported spatial scale.".into());
@@ -51,6 +73,7 @@ impl VideoProcessor {
             let [Some(w), Some(h)] = dimensions else {
                 return Err("Source dimensions unavailable.".into());
             };
+            let (w, h) = self.input.dimensions(w, h)?;
             let pixels = f64::from(w) * f64::from(h) * self.scale * self.scale;
             if f64::from(w.max(h)) * self.scale > 8192.0 || pixels > 7680.0 * 4320.0 {
                 return Err("Choose a smaller scale for this source resolution.".into());

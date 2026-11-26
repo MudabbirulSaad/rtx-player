@@ -4,7 +4,9 @@ from fractions import Fraction
 import vapoursynth as vs
 
 factor = Fraction(user_data)
-if not (1 < factor <= 6) or (not globals().get("finite_export") and factor not in (2, Fraction(5, 2), 3, 4, 5, 6)):
+if not globals().get("finite_export"):
+    factor = factor.limit_denominator(1001)
+if not 1 < factor <= 6:
     raise ValueError("Unsupported RIFE multiplier")
 root = Path(__file__).resolve().parents[1] / "providers/rife"
 core = vs.core
